@@ -41,3 +41,10 @@ STATE.md
 # Large binary downloads in addons
 addons/**/downloads/
 *.zip
+
+# Android Build & Output
+android/
+build/
+*.aab
+*.apk
+
