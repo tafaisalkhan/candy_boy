@@ -114,7 +114,7 @@ func _ready() -> void:
 			call_deferred("_start_game", true)
 			return
 
-	if FileAccess.file_exists("res://test_loop.flag") or FileAccess.file_exists("res://test_powerup.flag") or FileAccess.file_exists("res://test_screenshot.flag") or FileAccess.file_exists("res://test_cupboard.flag") or FileAccess.file_exists("res://test_victory.flag") or FileAccess.file_exists("res://test_fail.flag") or FileAccess.file_exists("res://test_rewarded_powerup.flag"):
+	if FileAccess.file_exists("res://test_loop.flag") or FileAccess.file_exists("res://test_powerup.flag") or FileAccess.file_exists("res://test_screenshot.flag") or FileAccess.file_exists("res://test_cupboard.flag") or FileAccess.file_exists("res://test_victory.flag") or FileAccess.file_exists("res://test_fail.flag") or FileAccess.file_exists("res://test_rewarded_powerup.flag") or FileAccess.file_exists("res://test_mission_intro.flag"):
 		call_deferred("_start_game", true)
 		return
 

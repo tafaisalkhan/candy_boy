@@ -194,6 +194,10 @@ func _ready() -> void:
 		if FileAccess.file_exists("res://test_rewarded_powerup.flag"):
 			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://test_rewarded_powerup.flag"))
 		_test_rewarded_powerup_prompt()
+	elif "--test-mission-intro" in all_args or FileAccess.file_exists("res://test_mission_intro.flag"):
+		if FileAccess.file_exists("res://test_mission_intro.flag"):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://test_mission_intro.flag"))
+		_test_mission_intro_screenshot()
 	elif "--test-touch" in all_args:
 		_test_mobile_touch_movement()
 	elif GameManager != null and not GameManager.is_privacy_policy_accepted:
@@ -269,6 +273,19 @@ func _test_rewarded_powerup_prompt() -> void:
 			var path := ProjectSettings.globalize_path("res://screenshot_rewarded_powerup_prompt.png")
 			img.save_png(path)
 			print("REWARDED_POWERUP_PROMPT_SCREENSHOT_SAVED")
+	get_tree().quit()
+
+func _test_mission_intro_screenshot() -> void:
+	await get_tree().create_timer(0.4).timeout
+	_show_mission_start_popup()
+	await get_tree().create_timer(0.45).timeout
+	var vp := get_viewport()
+	if vp:
+		var img := vp.get_texture().get_image()
+		if img:
+			var path := ProjectSettings.globalize_path("res://screenshot_mission_intro.png")
+			img.save_png(path)
+			print("MISSION_INTRO_SCREENSHOT_SAVED")
 	get_tree().quit()
 
 func _test_cupboard_opening() -> void:
@@ -562,6 +579,8 @@ func _show_mission_start_popup() -> void:
 	var scene := load("res://scenes/popups/mission_intro_popup.tscn") as PackedScene
 	if scene != null:
 		mission_intro_popup = scene.instantiate()
+		if mission_intro_popup.has_method("set_target_items"):
+			mission_intro_popup.set_target_items(target_items)
 		mission_intro_popup.start_pressed.connect(_skip_intro_sequence)
 		hud_root.add_child(mission_intro_popup)
 
@@ -2191,33 +2210,27 @@ func _setup_hud() -> void:
 	ic_slots_hbox.add_theme_constant_override("separation", 10)
 	ic_vbox.add_child(ic_slots_hbox)
 
-	# 3. Bottom Powerup Tray (Consistent, Proportionate Dock)
+	# 3. Bottom Powerup Tray - Clean Minimalist Transparent Dock
 	var tray := PanelContainer.new()
 	tray.name = "PowerupTray"
 	tray.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	tray.offset_left = -260.0
-	tray.offset_right = 260.0
-	tray.offset_top = -118.0
-	tray.offset_bottom = -20.0
+	tray.offset_left = -220.0
+	tray.offset_right = 220.0
+	tray.offset_top = -115.0
+	tray.offset_bottom = -15.0
 
-	var tray_style := StyleBoxFlat.new()
-	tray_style.bg_color = Color(0.04, 0.45, 0.78, 0.90)
-	tray_style.set_corner_radius_all(22)
-	tray_style.border_color = Color("#74b9ff")
-	tray_style.set_border_width_all(3)
-	tray_style.shadow_color = Color(0, 0, 0, 0.25)
-	tray_style.shadow_size = 6
+	var tray_style := StyleBoxEmpty.new()
 	tray.add_theme_stylebox_override("panel", tray_style)
 	hud_root.add_child(tray)
 
 	var tray_box := HBoxContainer.new()
 	tray_box.alignment = BoxContainer.ALIGNMENT_CENTER
-	tray_box.add_theme_constant_override("separation", 14)
+	tray_box.add_theme_constant_override("separation", 24)
 	tray.add_child(tray_box)
 
-	speed_badge_lbl = _add_interactive_powerup_item(tray_box, "res://assets/ui/powerup_speed_lightning.svg", "SPEED", "🪙 %d" % POWERUP_COIN_COST, Color("#f39c12"), _activate_speed_powerup, speed_btn_refs)
-	shield_badge_lbl = _add_interactive_powerup_item(tray_box, "res://assets/ui/powerup_invis_white_ball.svg", "INVISIBLE", "🪙 %d" % POWERUP_COIN_COST, Color("#3498db"), _activate_invisibility_powerup, shield_btn_refs)
-	ghost_badge_lbl = _add_interactive_powerup_item(tray_box, "res://assets/ui/powerup_bypass_wall.svg", "BYPASS WALL", "🪙 %d" % POWERUP_COIN_COST, Color("#9b59b6"), _activate_wall_pass_powerup, ghost_btn_refs)
+	speed_badge_lbl = _add_interactive_powerup_item(tray_box, "res://assets/ui/powerup_speed_lightning.svg", "", "🪙 %d" % POWERUP_COIN_COST, Color("#f39c12"), _activate_speed_powerup, speed_btn_refs)
+	shield_badge_lbl = _add_interactive_powerup_item(tray_box, "res://assets/ui/powerup_invis_white_ball.svg", "", "🪙 %d" % POWERUP_COIN_COST, Color("#00cec9"), _activate_invisibility_powerup, shield_btn_refs)
+	ghost_badge_lbl = _add_interactive_powerup_item(tray_box, "res://assets/ui/powerup_bypass_wall.svg", "", "🪙 %d" % POWERUP_COIN_COST, Color("#e67e22"), _activate_wall_pass_powerup, ghost_btn_refs)
 	_update_powerup_locks()
 
 	# 4. Floating Mobile Virtual Joystick
@@ -2251,22 +2264,34 @@ func _setup_hud() -> void:
 	joystick_knob.position = Vector2(36, 36)
 	joystick_base.add_child(joystick_knob)
 
-func _add_interactive_powerup_item(parent: HBoxContainer, svg_path: String, powerup_title: String, badge_text: String, badge_col: Color, on_click: Callable, out_refs: Dictionary = {}) -> Label:
+func _add_interactive_powerup_item(parent: HBoxContainer, svg_path: String, _powerup_title: String, badge_text: String, badge_col: Color, on_click: Callable, out_refs: Dictionary = {}) -> Label:
 	var btn := Button.new()
-	btn.custom_minimum_size = Vector2(150, 86)
+	btn.custom_minimum_size = Vector2(92, 92)
 	btn.flat = true
 	btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	parent.add_child(btn)
+
+	# Transparent round background with subtle border
+	var btn_bg := Panel.new()
+	btn_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	btn_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var bg_style := StyleBoxFlat.new()
+	bg_style.bg_color = Color(0.10, 0.14, 0.22, 0.55)
+	bg_style.border_color = badge_col
+	bg_style.set_border_width_all(2)
+	bg_style.set_corner_radius_all(24)
+	btn_bg.add_theme_stylebox_override("panel", bg_style)
+	btn.add_child(btn_bg)
 
 	var icon := TextureRect.new()
 	icon.texture = _load_ui_texture(svg_path)
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.set_anchors_preset(Control.PRESET_FULL_RECT)
-	icon.offset_left = 12.0
-	icon.offset_top = 2.0
-	icon.offset_right = -12.0
-	icon.offset_bottom = -24.0
+	icon.offset_left = 16.0
+	icon.offset_top = 8.0
+	icon.offset_right = -16.0
+	icon.offset_bottom = -26.0
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	btn.add_child(icon)
 
@@ -2274,35 +2299,21 @@ func _add_interactive_powerup_item(parent: HBoxContainer, svg_path: String, powe
 	lock_overlay.texture = _load_ui_texture("res://assets/ui/powerup_lock_overlay.svg")
 	lock_overlay.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	lock_overlay.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	lock_overlay.custom_minimum_size = Vector2(34, 34)
-	lock_overlay.size = Vector2(34, 34)
-	lock_overlay.position = Vector2(58, 8)
+	lock_overlay.custom_minimum_size = Vector2(36, 36)
+	lock_overlay.size = Vector2(36, 36)
+	lock_overlay.position = Vector2(28, 14)
 	lock_overlay.visible = false
 	lock_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	btn.add_child(lock_overlay)
 
-	var title_lbl := Label.new()
-	title_lbl.text = powerup_title
-	title_lbl.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	title_lbl.offset_top = -22.0
-	title_lbl.offset_bottom = 0.0
-	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	if game_title_font != null:
-		title_lbl.add_theme_font_override("font", game_title_font)
-	title_lbl.add_theme_font_size_override("font_size", 13)
-	title_lbl.add_theme_color_override("font_color", Color("#ffeaa7"))
-	title_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
-	title_lbl.add_theme_constant_override("outline_size", 3)
-	title_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	btn.add_child(title_lbl)
-
+	# Bottom count or lock badge (Only powerup icon with count or lock, transparent background)
 	var badge := Panel.new()
-	badge.custom_minimum_size = Vector2(48, 18)
-	badge.size = Vector2(48, 18)
-	badge.position = Vector2(96, 4)
+	badge.custom_minimum_size = Vector2(76, 22)
+	badge.size = Vector2(76, 22)
+	badge.position = Vector2(8, 64)
 	var b_style := StyleBoxFlat.new()
 	b_style.bg_color = badge_col
-	b_style.set_corner_radius_all(9)
+	b_style.set_corner_radius_all(11)
 	b_style.border_color = Color.WHITE
 	b_style.set_border_width_all(1)
 	badge.add_theme_stylebox_override("panel", b_style)
@@ -2316,18 +2327,18 @@ func _add_interactive_powerup_item(parent: HBoxContainer, svg_path: String, powe
 	b_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	if game_title_font != null:
 		b_lbl.add_theme_font_override("font", game_title_font)
-	b_lbl.add_theme_font_size_override("font_size", 11)
+	b_lbl.add_theme_font_size_override("font_size", 13)
 	b_lbl.add_theme_color_override("font_color", Color.WHITE)
 	b_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
-	b_lbl.add_theme_constant_override("outline_size", 2)
+	b_lbl.add_theme_constant_override("outline_size", 3)
 	b_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	badge.add_child(b_lbl)
 
 	out_refs["icon"] = icon
 	out_refs["lock"] = lock_overlay
-	out_refs["title"] = title_lbl
 	out_refs["badge_style"] = b_style
 	out_refs["badge_lbl"] = b_lbl
+	out_refs["btn_bg_style"] = bg_style
 	out_refs["unlocked_col"] = badge_col
 
 	btn.pressed.connect(on_click)
@@ -2338,18 +2349,18 @@ func _apply_powerup_lock_visual(refs: Dictionary, is_locked: bool, unlock_lvl: i
 		return
 	var icon_rect: TextureRect = refs.get("icon")
 	var lock_rect: TextureRect = refs.get("lock")
-	var title_lbl: Label = refs.get("title")
 	var b_style: StyleBoxFlat = refs.get("badge_style")
+	var bg_style: StyleBoxFlat = refs.get("btn_bg_style")
 	var b_lbl: Label = refs.get("badge_lbl")
 	var unlocked_col: Color = refs.get("unlocked_col", Color("#f39c12"))
 	if is_instance_valid(icon_rect):
-		icon_rect.modulate = Color(0.38, 0.42, 0.48, 0.68) if is_locked else Color.WHITE
+		icon_rect.modulate = Color(0.4, 0.45, 0.5, 0.6) if is_locked else Color.WHITE
 	if is_instance_valid(lock_rect):
 		lock_rect.visible = is_locked
-	if is_instance_valid(title_lbl):
-		title_lbl.add_theme_color_override("font_color", Color("#b2bec3") if is_locked else Color("#ffeaa7"))
+	if bg_style != null:
+		bg_style.border_color = Color("#576574") if is_locked else unlocked_col
 	if b_style != null:
-		b_style.bg_color = Color("#636e72") if is_locked else unlocked_col
+		b_style.bg_color = Color("#576574") if is_locked else unlocked_col
 	if is_instance_valid(b_lbl):
 		b_lbl.text = ("🔒 LV %d" % unlock_lvl) if is_locked else ("🪙 %d" % POWERUP_COIN_COST)
 
@@ -2843,9 +2854,9 @@ func _show_powerup_toast(text: String, col: Color) -> void:
 	tw.tween_callback(toast.queue_free)
 
 func _update_powerups(delta: float) -> void:
-	var cost_txt := "%d" % POWERUP_COIN_COST
-	var invis_idle_txt := ("LVL %d" % INVIS_UNLOCK_LEVEL) if current_level < INVIS_UNLOCK_LEVEL else cost_txt
-	var wall_idle_txt := ("LVL %d" % BYPASS_WALL_UNLOCK_LEVEL) if current_level < BYPASS_WALL_UNLOCK_LEVEL else cost_txt
+	var cost_txt := "🪙 %d" % POWERUP_COIN_COST
+	var invis_idle_txt := ("🔒 LV %d" % INVIS_UNLOCK_LEVEL) if current_level < INVIS_UNLOCK_LEVEL else cost_txt
+	var wall_idle_txt := ("🔒 LV %d" % BYPASS_WALL_UNLOCK_LEVEL) if current_level < BYPASS_WALL_UNLOCK_LEVEL else cost_txt
 
 	if speed_boost_time > 0.0:
 		speed_boost_time = maxf(0.0, speed_boost_time - delta)
@@ -2883,7 +2894,7 @@ func _update_powerups(delta: float) -> void:
 				_set_player_transparency(1.0)
 			if is_instance_valid(ghost_badge_lbl):
 				ghost_badge_lbl.text = wall_idle_txt
-			_show_powerup_toast("BYPASS WALL ENDED!", Color("#9b59b6"))
+			_show_powerup_toast("BYPASS WALL ENDED!", Color("#e67e22"))
 	elif is_instance_valid(ghost_badge_lbl) and ghost_badge_lbl.text != wall_idle_txt:
 		ghost_badge_lbl.text = wall_idle_txt
 
