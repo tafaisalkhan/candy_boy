@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://clkuduvjr6441"]
+
+[ext_resource type="Script" path="res://scenes/cabinet/cabinet_item.gd" id="1_cabinet"]
+
+[node name="CabinetItem" type="Node3D"]
+script = ExtResource("1_cabinet")

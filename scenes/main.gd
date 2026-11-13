@@ -1,0 +1,2842 @@
+extends Node3D
+
+const FootstepManager = preload("res://components/footstep_manager.gd")
+const DoorController = preload("res://components/door_controller.gd")
+const LaserBarrier = preload("res://components/laser_barrier.gd")
+const FloorButton = preload("res://components/floor_button.gd")
+const KeyPickup = preload("res://components/key_pickup.gd")
+const PushableProp = preload("res://components/pushable_prop.gd")
+const SecurityCamera = preload("res://components/security_camera.gd")
+const GuardController = preload("res://components/guard_controller.gd")
+const StationProps = preload("res://components/station_props.gd")
+const HomeFurniture = preload("res://components/home_furniture.gd")
+const OutdoorScenery = preload("res://components/outdoor_scenery.gd")
+const CollectibleItem = preload("res://components/collectible_item.gd")
+const RoomCompartmentBuilder = preload("res://components/room_compartment_builder.gd")
+const LevelGenerator = preload("res://components/level_generator.gd")
+const SubwayScenery = preload("res://components/subway_scenery.gd")
+
+@export var current_level: int = 1
+
+var floor_tile_texture: ImageTexture = null
+var level_exit_pos: Vector3 = Vector3(999.0, 0.0, 999.0)
+
+# Core References
+var level_root: Node3D = null
+var main_camera: Camera3D = null
+var hud_root: CanvasLayer = null
+var player_root: Node3D = null
+var player_mesh: Node3D = null
+var player_anim: AnimationPlayer = null
+var player_ring: Node3D = null
+var footstep_mgr: FootstepManager = null
+
+# Active Entities & Colliders
+var wall_colliders: Array[AABB] = []
+var active_lasers: Dictionary = {} # id -> LaserBarrier
+var active_buttons: Array[FloorButton] = []
+var active_doors: Array[DoorController] = []
+var active_guards: Array[GuardController] = []
+var active_cameras: Array[SecurityCamera] = []
+var active_keys: Array[KeyPickup] = []
+var active_props: Array[PushableProp] = []
+var candy_node: Node3D = null
+var candy_pos: Vector3 = Vector3.ZERO
+var candy_spawn_pos: Vector3 = Vector3.ZERO
+var cupboard_root: Node3D = null
+var cupboard_door_left: Node3D = null
+var cupboard_door_right: Node3D = null
+var cupboard_prompt: Label3D = null
+var is_cupboard_open: bool = false
+
+# Item Collection System
+var target_items: Array[Dictionary] = []
+var collected_items_count: int = 0
+var target_items_total: int = 0
+var all_items_collected: bool = false
+var active_containers: Array[Dictionary] = []
+var active_open_items: Array[Dictionary] = []
+var item_collector_panel: PanelContainer = null
+var item_collector_label: Label = null
+
+# Mobile Virtual Joystick & Touch Movement
+var is_touch_active: bool = false
+var touch_start_pos: Vector2 = Vector2.ZERO
+var touch_move_dir: Vector3 = Vector3.ZERO
+var joystick_base: Panel = null
+var joystick_knob: Panel = null
+var item_slot_panels: Array[Panel] = []
+var item_slot_badges: Array[Label] = []
+
+# State
+var is_game_active: bool = false
+var is_level_cleared: bool = false
+var is_spotted: bool = false
+var player_has_key: bool = false
+var candy_collected: bool = false
+var auto_walk_forward: bool = false
+var auto_walk_loop: bool = false
+var coins: int = 1577
+var player_target_rotation: float = 0.0
+var player_spawn_pos: Vector3 = Vector3.ZERO
+var entrance_door_pos: Vector3 = Vector3(0.0, 0.0, 8.0)
+var entrance_outside_pos: Vector3 = Vector3(0.0, 0.0, 11.2)
+var is_entering_level: bool = false
+var spawn_marker_label: Label3D = null
+var spawn_marker_border_mat: StandardMaterial3D = null
+var active_level_data: Dictionary = {}
+
+# Powerups State (Speed, Invisibility, and Wall Pass)
+var speed_boost_time: float = 0.0
+var speed_boost_cooldown: float = 0.0
+var invisibility_time: float = 0.0
+var invisibility_cooldown: float = 0.0
+var is_player_invisible: bool = false
+var wall_pass_time: float = 0.0
+var is_wall_pass_active: bool = false
+var active_powerups: Array[Dictionary] = []
+
+# UI References
+var victory_popup: Control = null
+var fail_popup: Control = null
+var privacy_popup: Control = null
+var coin_lbl: Label = null
+var coin_panel: PanelContainer = null
+var speed_badge_lbl: Label = null
+var ghost_badge_lbl: Label = null
+var shield_badge_lbl: Label = null
+var speed_btn_refs: Dictionary = {}
+var shield_btn_refs: Dictionary = {}
+var ghost_btn_refs: Dictionary = {}
+var game_title_font: Font = null
+var game_body_font: Font = null
+
+# Cinematic Camera Intro Sequence & Mission Popup
+var is_intro_cinematic_active: bool = false
+var intro_cinematic_tween: Tween = null
+var mission_intro_popup: Control = null
+
+# Constants
+const PLAYER_SPEED: float = 4.0
+const WALL_H: float = 2.6
+const WALL_T: float = 0.35
+const POWERUP_COIN_COST: int = 10
+const SPEED_UNLOCK_LEVEL: int = 1
+const INVIS_UNLOCK_LEVEL: int = 5
+const BYPASS_WALL_UNLOCK_LEVEL: int = 10
+const BOY_MODEL: PackedScene = preload("res://assets/models/boys/Model/characterMedium.fbx")
+
+func _init_game_fonts() -> void:
+	var tf := FontFile.new()
+	if tf.load_dynamic_font(ProjectSettings.globalize_path("res://assets/fonts/LuckiestGuy-Regular.ttf")) == OK:
+		game_title_font = tf
+	var bf := FontFile.new()
+	if bf.load_dynamic_font(ProjectSettings.globalize_path("res://assets/fonts/Fredoka-Variable.ttf")) == OK:
+		game_body_font = bf
+	if game_body_font == null:
+		game_body_font = game_title_font
+
+func _ready() -> void:
+	_init_game_fonts()
+	var all_args := OS.get_cmdline_user_args() + OS.get_cmdline_args()
+	for arg in all_args:
+		if arg.begins_with("--level="):
+			current_level = int(arg.trim_prefix("--level="))
+
+	footstep_mgr = FootstepManager.new()
+	add_child(footstep_mgr)
+	_setup_environment()
+	_setup_hud()
+
+	if GameManager != null:
+		coins = GameManager.coins
+		if SignalHub != null:
+			SignalHub.coins_changed.connect(_on_coins_changed)
+
+	load_level(current_level)
+
+	# Show Banner Ad on bottom of screen (AdMob)
+	var ad_mgr = get_tree().root.get_node_or_null("AdManager")
+	if ad_mgr != null and ad_mgr.has_method("show_banner"):
+		ad_mgr.show_banner()
+
+	if "--screen-game" in all_args or "--screenshot" in all_args or FileAccess.file_exists("res://test_screenshot.flag"):
+		if FileAccess.file_exists("res://test_screenshot.flag"):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://test_screenshot.flag"))
+		_capture_and_quit()
+	elif "--test-door" in all_args:
+		auto_walk_forward = true
+		_test_door_passage()
+	elif "--test-loop" in all_args or FileAccess.file_exists("res://test_loop.flag"):
+		if FileAccess.file_exists("res://test_loop.flag"):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://test_loop.flag"))
+		auto_walk_loop = true
+		_test_candy_loop()
+	elif "--test-victory" in all_args or FileAccess.file_exists("res://test_victory.flag"):
+		if FileAccess.file_exists("res://test_victory.flag"):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://test_victory.flag"))
+		_test_victory_popup()
+	elif "--test-powerup" in all_args or FileAccess.file_exists("res://test_powerup.flag"):
+		if FileAccess.file_exists("res://test_powerup.flag"):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://test_powerup.flag"))
+		_test_powerups()
+	elif "--test-fail" in all_args or FileAccess.file_exists("res://test_fail.flag"):
+		if FileAccess.file_exists("res://test_fail.flag"):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://test_fail.flag"))
+		_test_fail_popup()
+	elif "--test-cupboard" in all_args or FileAccess.file_exists("res://test_cupboard.flag"):
+		if FileAccess.file_exists("res://test_cupboard.flag"):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://test_cupboard.flag"))
+		_test_cupboard_opening()
+	elif "--view-room1" in all_args:
+		_test_view_room1()
+	elif "--test-touch" in all_args:
+		_test_mobile_touch_movement()
+	elif GameManager != null and not GameManager.is_privacy_policy_accepted:
+		call_deferred("_show_privacy_policy_popup")
+
+func _show_privacy_policy_popup() -> void:
+	if is_instance_valid(privacy_popup) or not is_instance_valid(hud_root):
+		return
+	var scene := load("res://scenes/popups/privacy_policy_popup.tscn") as PackedScene
+	if scene != null:
+		privacy_popup = scene.instantiate()
+		privacy_popup.accepted.connect(func():
+			if GameManager != null:
+				GameManager.set_privacy_policy_accepted(true)
+			privacy_popup = null
+		)
+		hud_root.add_child(privacy_popup)
+
+func _test_mobile_touch_movement() -> void:
+	await get_tree().create_timer(0.4).timeout
+	var initial_pos := player_root.position
+	print("TOUCH_TEST_START: player_pos=", initial_pos)
+	_start_mobile_touch(Vector2(270, 600))
+	_update_mobile_drag(Vector2(200, 480))
+	await get_tree().create_timer(0.8).timeout
+	var moved_pos := player_root.position
+	print("TOUCH_TEST_MID: player_pos=", moved_pos, " moved_dist=", moved_pos.distance_to(initial_pos))
+	var vp := get_viewport()
+	if vp:
+		var img := vp.get_texture().get_image()
+		if img:
+			var path := ProjectSettings.globalize_path("res://screenshot_touch_movement.png")
+			img.save_png(path)
+			print("TOUCH_SCREENSHOT_SAVED")
+	_reset_mobile_touch()
+	await get_tree().create_timer(0.2).timeout
+	if moved_pos.distance_to(initial_pos) > 0.5:
+		print("TOUCH_TEST_SUCCESSFUL: Mobile touch successfully moved player in 3D world!")
+	else:
+		print("TOUCH_TEST_FAILED: Player did not move with touch!")
+	get_tree().quit()
+
+func _test_view_room1() -> void:
+	await get_tree().create_timer(0.4).timeout
+	if is_instance_valid(player_root):
+		player_root.position = Vector3(0.0, 0.0, -16.0)
+	main_camera.position = Vector3(0.0, 27.5, -12.5)
+	main_camera.rotation_degrees = Vector3(-68.0, 0.0, 0.0)
+	await get_tree().create_timer(0.4).timeout
+	var vp := get_viewport()
+	if vp:
+		var img := vp.get_texture().get_image()
+		if img:
+			var path := ProjectSettings.globalize_path("res://screenshot_room1_view.png")
+			img.save_png(path)
+			print("ROOM1_VIEW_SCREENSHOT_SAVED")
+	get_tree().quit()
+
+func _test_cupboard_opening() -> void:
+	await get_tree().create_timer(0.4).timeout
+	player_root.position = candy_pos + Vector3(0.0, 0.0, 1.4)
+	main_camera.position.z = candy_pos.z + 4.5
+	_open_cupboard_and_collect()
+	await get_tree().create_timer(0.35).timeout
+	var vp := get_viewport()
+	if vp:
+		var img := vp.get_texture().get_image()
+		if img:
+			var path := ProjectSettings.globalize_path("res://screenshot_cupboard_open.png")
+			img.save_png(path)
+			print("CUPBOARD_OPEN_SCREENSHOT_SAVED")
+	get_tree().quit()
+
+func _test_fail_popup() -> void:
+	await get_tree().create_timer(0.3).timeout
+	_trigger_fail("Alarm! Guard Spotted You!")
+	await get_tree().create_timer(1.2).timeout
+	var vp := get_viewport()
+	if vp:
+		var img := vp.get_texture().get_image()
+		if img:
+			var path := ProjectSettings.globalize_path("res://screenshot_fail_popup.png")
+			img.save_png(path)
+			print("FAIL_POPUP_SCREENSHOT_SAVED")
+	get_tree().quit()
+
+func _test_candy_loop() -> void:
+	print("T_LOOP start: ", Time.get_ticks_msec())
+	await get_tree().create_timer(0.4).timeout
+	print("T_LOOP after 0.4s: ", Time.get_ticks_msec())
+	is_entering_level = false
+	for key in active_keys:
+		if is_instance_valid(key) and is_instance_valid(player_root):
+			player_root.position = Vector3(key.position.x, 0.0, key.position.z)
+			await get_tree().create_timer(0.35).timeout
+	for c in active_containers:
+		if is_instance_valid(player_root):
+			player_root.position = c["pos"] + Vector3(0.0, 0.0, 1.2)
+		print("T_LOOP moved to container: ", Time.get_ticks_msec())
+		await get_tree().create_timer(0.8).timeout
+		print("T_LOOP after container 0.8s: ", Time.get_ticks_msec())
+	print("LOOP_TEST_MID: collected_count=", collected_items_count, " target_total=", target_items_total, " has_key=", player_has_key, " player_pos=", player_root.position)
+	if is_instance_valid(player_root):
+		player_root.position = entrance_outside_pos
+	await get_tree().create_timer(0.8).timeout
+	print("T_LOOP after exit 0.8s: ", Time.get_ticks_msec())
+	print("LOOP_TEST_END: is_level_cleared=", is_level_cleared, " player_pos=", player_root.position)
+	if is_level_cleared:
+		print("LOOP_TEST_SUCCESSFUL: Player collected all items and went outside to win!")
+	else:
+		print("LOOP_TEST_STATUS: cleared=", is_level_cleared, " collected=", collected_items_count)
+	await get_tree().create_timer(0.5).timeout
+	var vp := get_viewport()
+	if vp:
+		var img := vp.get_texture().get_image()
+		if img:
+			var path := ProjectSettings.globalize_path("res://screenshot_candy_win.png")
+			img.save_png(path)
+	get_tree().quit()
+
+func _test_victory_popup() -> void:
+	await get_tree().create_timer(0.3).timeout
+	_trigger_win()
+	await get_tree().create_timer(1.6).timeout
+	print("VICTORY_TEST_COINS: coins=", coins)
+	var vp := get_viewport()
+	if vp:
+		var img := vp.get_texture().get_image()
+		if img:
+			var path := ProjectSettings.globalize_path("res://screenshot_victory_popup.png")
+			img.save_png(path)
+			print("VICTORY_POPUP_SCREENSHOT_SAVED")
+	get_tree().quit()
+
+func _test_powerups() -> void:
+	_skip_intro_sequence()
+	await get_tree().create_timer(0.6).timeout
+	var vp := get_viewport()
+	if vp:
+		var img := vp.get_texture().get_image()
+		if img:
+			var path := ProjectSettings.globalize_path("res://screenshot_powerup.png")
+			img.save_png(path)
+			print("POWERUP_SCREENSHOT_SAVED: is_invisible=", is_player_invisible, " speed_boost=", speed_boost_time)
+	get_tree().quit()
+
+func _test_door_passage() -> void:
+	await get_tree().create_timer(1.8).timeout
+	print("TEST_DOOR_CHECK: player_pos=", player_root.position)
+	if player_root.position.z < -5.0:
+		print("DOOR_PASSAGE_SUCCESSFUL: Player successfully passed through opened door into next room!")
+	else:
+		print("DOOR_PASSAGE_FAILED: Player stopped at z=", player_root.position.z)
+	var vp := get_viewport()
+	if vp:
+		var img := vp.get_texture().get_image()
+		if img:
+			var path := ProjectSettings.globalize_path("res://screenshot_door_pass.png")
+			img.save_png(path)
+	get_tree().quit()
+
+func _capture_and_quit() -> void:
+	print("CAPTURE_AND_QUIT_STARTED: waiting 2.0s for intro cinematic & hud...")
+	await get_tree().create_timer(2.0).timeout
+	print("CAPTURE_AND_QUIT_TIMER_DONE")
+	var vp := get_viewport()
+	if vp:
+		var img := vp.get_texture().get_image()
+		if img:
+			var path := ProjectSettings.globalize_path("res://screenshot_candyboy.png")
+			img.save_png(path)
+			print("CANDYBOY_SCREENSHOT_SAVED: path=", path)
+	get_tree().quit()
+
+func _setup_environment() -> void:
+	RenderingServer.set_default_clear_color(Color("#48dbfb"))
+	var world_env := WorldEnvironment.new()
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color("#48dbfb")
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color("#ffffff")
+	env.ambient_light_energy = 0.65
+	world_env.environment = env
+	add_child(world_env)
+
+	var sun := DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-58.0, -32.0, 0.0)
+	sun.light_energy = 0.95
+	sun.shadow_enabled = true
+	add_child(sun)
+
+	main_camera = Camera3D.new()
+	main_camera.name = "MainCamera"
+	main_camera.fov = 46.0
+	main_camera.rotation_degrees = Vector3(-68.0, 0.0, 0.0)
+	main_camera.current = true
+	add_child(main_camera)
+
+	# Lush outdoor garden lawn ground void
+	var bg_floor := MeshInstance3D.new()
+	var bf_mesh := BoxMesh.new()
+	bf_mesh.size = Vector3(160.0, 0.4, 160.0)
+	bg_floor.mesh = bf_mesh
+	bg_floor.position = Vector3(0.0, -0.2, 0.0)
+	var bg_mat := StandardMaterial3D.new()
+	bg_mat.albedo_color = Color("#38ada9")
+	bg_floor.material_override = bg_mat
+	add_child(bg_floor)
+
+func load_level(lvl: int) -> void:
+	current_level = lvl
+	is_game_active = false
+	is_level_cleared = false
+	is_spotted = false
+	player_has_key = false
+	candy_collected = false
+	candy_node = null
+	cupboard_root = null
+	cupboard_door_left = null
+	cupboard_door_right = null
+	cupboard_prompt = null
+	is_cupboard_open = false
+
+	# Multi-Item Collection State Reset
+	target_items.clear()
+	collected_items_count = 0
+	target_items_total = 0
+	all_items_collected = false
+	active_containers.clear()
+	active_open_items.clear()
+
+	# Clean previous level
+	if is_instance_valid(level_root):
+		level_root.queue_free()
+	if is_instance_valid(fail_popup):
+		fail_popup.queue_free()
+		fail_popup = null
+	if is_instance_valid(victory_popup):
+		victory_popup.queue_free()
+		victory_popup = null
+	wall_colliders.clear()
+	active_lasers.clear()
+	active_buttons.clear()
+	active_doors.clear()
+	active_guards.clear()
+	active_cameras.clear()
+	active_keys.clear()
+	active_props.clear()
+	active_powerups.clear()
+
+	level_root = Node3D.new()
+	level_root.name = "LevelRoot"
+	add_child(level_root)
+
+	# Read level JSON (or generate procedurally for infinite levels!)
+	var json_path := "res://levels/level_%d.json" % lvl
+	if FileAccess.file_exists(json_path):
+		var f := FileAccess.open(json_path, FileAccess.READ)
+		active_level_data = JSON.parse_string(f.get_as_text())
+		f.close()
+	else:
+		# Deterministic procedurally generated levels for unlimited replayability!
+		active_level_data = LevelGenerator.generate_level(lvl)
+
+	var p_info: Dictionary = active_level_data.get("characters", {}).get("player", {})
+	var p_pos_arr: Array = p_info.get("pos", [0.0, 0.0, 3.6])
+	player_spawn_pos = Vector3(float(p_pos_arr[0]), 0.0, float(p_pos_arr[2]))
+
+	var cam_info: Dictionary = active_level_data.get("camera", {})
+	if not cam_info.is_empty() and is_instance_valid(main_camera):
+		var cam_pos_arr: Array = cam_info.get("position", [0.0, 26.5, player_spawn_pos.z + 4.5])
+		main_camera.position = Vector3(float(cam_pos_arr[0]), float(cam_pos_arr[1]), float(cam_pos_arr[2]))
+		var cam_rot_arr: Array = cam_info.get("rotation_degrees", [-66.0, 0.0, 0.0])
+		main_camera.rotation_degrees = Vector3(float(cam_rot_arr[0]), float(cam_rot_arr[1]), float(cam_rot_arr[2]))
+		main_camera.fov = float(cam_info.get("fov", 48.0))
+
+	_build_level_geometry()
+	_build_player()
+	_update_hud()
+	_populate_item_collector_hud()
+	if SignalHub != null:
+		SignalHub.emit_level_started(lvl)
+	if SoundManager != null:
+		SoundManager.play_sfx("start")
+	call_deferred("_start_intro_sequence")
+
+func _start_intro_sequence() -> void:
+	var all_args := OS.get_cmdline_args() + OS.get_cmdline_user_args()
+	for arg in all_args:
+		if arg.begins_with("--test"):
+			return
+	if FileAccess.file_exists("res://test_loop.flag") or FileAccess.file_exists("res://test_door.flag"):
+		return
+
+	is_intro_cinematic_active = true
+	_show_mission_start_popup()
+
+	var target_cabs: Array = []
+	for c in active_containers:
+		if is_instance_valid(c.get("root")):
+			target_cabs.append(c)
+
+	if target_cabs.is_empty():
+		await get_tree().create_timer(1.2).timeout
+		_end_intro_sequence()
+		return
+
+	intro_cinematic_tween = create_tween()
+
+	for i in range(target_cabs.size()):
+		var c = target_cabs[i]
+		var c_pos: Vector3 = c["pos"]
+		var target_cam := Vector3(c_pos.x * 0.85, 20.0, c_pos.z + 4.2)
+
+		# Glide camera to cabinet
+		intro_cinematic_tween.tween_property(main_camera, "position", target_cam, 1.0).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+		# Pulse cabinet beacon and show toast
+		intro_cinematic_tween.chain().tween_callback(func():
+			if is_instance_valid(c.get("beacon")):
+				var b_tw := create_tween()
+				b_tw.tween_property(c["beacon"], "scale", Vector3.ONE * 1.5, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				b_tw.tween_property(c["beacon"], "scale", Vector3.ONE, 0.22)
+			if is_instance_valid(c.get("prompt")):
+				c["prompt"].visible = true
+			if SoundManager != null:
+				SoundManager.play_sfx("cabinet")
+			_show_powerup_toast("🎯 TARGET: %s %s" % [c.get("icon", "🎁"), c.get("name", "ITEM").to_upper()], Color("#f1c40f"))
+		)
+		intro_cinematic_tween.chain().tween_interval(1.1)
+		intro_cinematic_tween.chain().tween_callback(func():
+			if is_instance_valid(c.get("prompt")):
+				c["prompt"].visible = false
+		)
+
+	# Glide camera smoothly back to entrance door / player spawn
+	var entrance_cam := Vector3(player_spawn_pos.x * 0.75, 27.5, player_spawn_pos.z + 4.5)
+	intro_cinematic_tween.chain().tween_property(main_camera, "position", entrance_cam, 1.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	intro_cinematic_tween.chain().tween_callback(func():
+		_end_intro_sequence()
+	)
+
+func _show_mission_start_popup() -> void:
+	if not is_instance_valid(hud_root) or is_instance_valid(mission_intro_popup):
+		return
+	var scene := load("res://scenes/popups/mission_intro_popup.tscn") as PackedScene
+	if scene != null:
+		mission_intro_popup = scene.instantiate()
+		mission_intro_popup.start_pressed.connect(_skip_intro_sequence)
+		hud_root.add_child(mission_intro_popup)
+
+func _skip_intro_sequence() -> void:
+	if intro_cinematic_tween != null and intro_cinematic_tween.is_valid():
+		intro_cinematic_tween.kill()
+	var entrance_cam := Vector3(player_spawn_pos.x * 0.75, 27.5, player_spawn_pos.z + 4.5)
+	main_camera.position = entrance_cam
+	_end_intro_sequence()
+
+func _end_intro_sequence() -> void:
+	if is_instance_valid(mission_intro_popup):
+		var tw := create_tween()
+		tw.tween_property(mission_intro_popup, "modulate:a", 0.0, 0.25)
+		tw.chain().tween_callback(mission_intro_popup.queue_free)
+	is_intro_cinematic_active = false
+	_show_powerup_toast("READY... GO! 🚀", Color("#2ecc71"))
+
+func _build_level_geometry() -> void:
+	var rooms: Array = active_level_data.get("rooms", [])
+	var room_depth: float = float(active_level_data.get("room_depth", 10.0))
+	var house_w: float = float(active_level_data.get("house_width", 14.0))
+	var half_w := house_w * 0.5
+
+	for r_idx in range(rooms.size()):
+		var r_data: Dictionary = rooms[r_idx]
+		var is_positioned_room: bool = r_data.has("center")
+		var r_center := Vector3(0.0, 0.0, -float(r_idx) * room_depth)
+		var cur_w := house_w
+		var cur_d := room_depth
+
+		if is_positioned_room:
+			var raw_c: Array = r_data["center"]
+			r_center = Vector3(float(raw_c[0]), 0.0, float(raw_c[2]))
+			cur_w = float(r_data.get("width", house_w))
+			cur_d = float(r_data.get("depth", room_depth))
+
+		var cur_half_w := cur_w * 0.5
+		var cur_half_d := cur_d * 0.5
+
+		var r_node := Node3D.new()
+		r_node.name = "Room_%d" % r_idx
+		level_root.add_child(r_node)
+
+		# 1. Floor
+		_create_room_floor(r_center, cur_w, cur_d, r_node)
+
+		if not is_positioned_room:
+			# Legacy linear 1D room building (Levels 1-6)
+			var r_z_mid: float = r_center.z
+			_create_wall(Vector3(-half_w, WALL_H * 0.5, r_z_mid), Vector3(WALL_T, WALL_H, room_depth), r_node)
+			_create_wall(Vector3(half_w, WALL_H * 0.5, r_z_mid), Vector3(WALL_T, WALL_H, room_depth), r_node)
+
+			if r_data.has("compartment_archetype"):
+				var arch_name: String = String(r_data.get("compartment_archetype", ""))
+				RoomCompartmentBuilder.build_archetype(
+					arch_name,
+					Vector3(0.0, 0.0, r_z_mid),
+					half_w,
+					room_depth,
+					r_node,
+					Callable(self, "_create_wall"),
+					Callable(self, "_create_interior_door")
+				)
+
+			for comp in r_data.get("compartments", []):
+				var c_raw: Array = comp.get("pos", [0.0, 0.0, 0.0])
+				var c_size_raw: Array = comp.get("size", [0.35, WALL_H, 3.5])
+				var c_pos := Vector3(float(c_raw[0]), float(c_size_raw[1]) * 0.5, r_z_mid + float(c_raw[2]))
+				var c_size := Vector3(float(c_size_raw[0]), float(c_size_raw[1]), float(c_size_raw[2]))
+				_create_wall(c_pos, c_size, r_node)
+
+			if r_idx < rooms.size() - 1:
+				var div_z := r_z_mid - room_depth * 0.5
+				var doors_arr: Array = r_data.get("doors", [])
+				if doors_arr.is_empty():
+					doors_arr.append({ "x": 0.0, "width": 2.4, "color": "#f1be28" })
+
+				var door_info: Dictionary = doors_arr[0]
+				var dw: float = float(door_info.get("width", 2.4))
+				var dx: float = float(door_info.get("x", 0.0))
+				var d_color := Color("#27ae60")
+				var req_key: bool = bool(door_info.get("requires_key", false))
+
+				var left_w := (dx - dw * 0.5) - (-half_w)
+				if left_w > 0.05:
+					_create_wall(Vector3(-half_w + left_w * 0.5, WALL_H * 0.5, div_z), Vector3(left_w, WALL_H, WALL_T), r_node)
+				var right_w := half_w - (dx + dw * 0.5)
+				if right_w > 0.05:
+					_create_wall(Vector3(half_w - right_w * 0.5, WALL_H * 0.5, div_z), Vector3(right_w, WALL_H, WALL_T), r_node)
+
+				var door := DoorController.new()
+				door.position = Vector3(dx, 0.0, div_z)
+				door.setup(dw, d_color, req_key)
+				r_node.add_child(door)
+				active_doors.append(door)
+			elif r_idx == rooms.size() - 1:
+				var north_z := r_z_mid - room_depth * 0.5
+				_create_wall(Vector3(0.0, WALL_H * 0.5, north_z), Vector3(house_w, WALL_H, WALL_T), r_node)
+
+			if r_idx == 0:
+				var south_z := r_z_mid + room_depth * 0.5
+				var entry_x: float = player_spawn_pos.x
+				var dw_s: float = 3.0
+				var left_sw := (entry_x - dw_s * 0.5) - (-half_w)
+				if left_sw > 0.05:
+					_create_wall(Vector3(-half_w + left_sw * 0.5, WALL_H * 0.5, south_z), Vector3(left_sw, WALL_H, WALL_T), r_node)
+				var right_sw := half_w - (entry_x + dw_s * 0.5)
+				if right_sw > 0.05:
+					_create_wall(Vector3(half_w - right_sw * 0.5, WALL_H * 0.5, south_z), Vector3(right_sw, WALL_H, WALL_T), r_node)
+				var s_door := DoorController.new()
+				s_door.position = Vector3(entry_x, 0.0, south_z)
+				s_door.setup(dw_s, Color("#27ae60"), false)
+				r_node.add_child(s_door)
+				active_doors.append(s_door)
+				entrance_door_pos = Vector3(entry_x, 0.0, south_z)
+				entrance_outside_pos = Vector3(entry_x, 0.0, south_z + 3.2)
+				_create_room_floor(Vector3(entry_x, 0.0, south_z + 2.1), 3.4, 4.2, r_node)
+		else:
+			# Multi-Directional 2D Room Builder (Rooms above, left side, right side!)
+			for comp in r_data.get("compartments", []):
+				var c_raw: Array = comp.get("pos", [0.0, 0.0, 0.0])
+				var c_size_raw: Array = comp.get("size", [0.35, WALL_H, 3.5])
+				var c_pos := r_center + Vector3(float(c_raw[0]), float(c_size_raw[1]) * 0.5, float(c_raw[2]))
+				var c_size := Vector3(float(c_size_raw[0]), float(c_size_raw[1]), float(c_size_raw[2]))
+				_create_wall(c_pos, c_size, r_node)
+
+			var doors_north: Array[Dictionary] = []
+			var doors_south: Array[Dictionary] = []
+			var doors_west: Array[Dictionary] = []
+			var doors_east: Array[Dictionary] = []
+
+			for d_info in r_data.get("doors", []):
+				var w_name: String = String(d_info.get("wall", "north")).to_lower()
+				match w_name:
+					"north": doors_north.append(d_info)
+					"south": doors_south.append(d_info)
+					"west", "left": doors_west.append(d_info)
+					"east", "right": doors_east.append(d_info)
+					_: doors_north.append(d_info)
+
+			# North Wall
+			if doors_north.is_empty():
+				if not bool(r_data.get("open_north", false)):
+					_create_wall(Vector3(r_center.x, WALL_H * 0.5, r_center.z - cur_half_d), Vector3(cur_w, WALL_H, WALL_T), r_node)
+			else:
+				for d in doors_north:
+					var dw: float = float(d.get("width", 2.8))
+					var dx: float = float(d.get("x", r_center.x))
+					var left_l := (dx - dw * 0.5) - (r_center.x - cur_half_w)
+					if left_l > 0.05:
+						_create_wall(Vector3(r_center.x - cur_half_w + left_l * 0.5, WALL_H * 0.5, r_center.z - cur_half_d), Vector3(left_l, WALL_H, WALL_T), r_node)
+					var right_l := (r_center.x + cur_half_w) - (dx + dw * 0.5)
+					if right_l > 0.05:
+						_create_wall(Vector3(r_center.x + cur_half_w - right_l * 0.5, WALL_H * 0.5, r_center.z - cur_half_d), Vector3(right_l, WALL_H, WALL_T), r_node)
+					var door := DoorController.new()
+					door.position = Vector3(dx, 0.0, r_center.z - cur_half_d)
+					door.setup(dw, Color("#27ae60"), false)
+					r_node.add_child(door)
+					active_doors.append(door)
+
+			# South Wall (Room 0 always has a Main Entrance / Exit Door so player walks IN at start and goes OUT to complete!)
+			if r_idx == 0 and doors_south.is_empty() and not bool(r_data.get("open_south", false)):
+				var p_raw: Array = active_level_data.get("characters", {}).get("player", {}).get("pos", [r_center.x, 0.0, r_center.z + cur_half_d - 2.5])
+				var entry_x: float = float(p_raw[0])
+				doors_south.append({ "wall": "south", "x": entry_x, "width": 3.0 })
+				entrance_door_pos = Vector3(entry_x, 0.0, r_center.z + cur_half_d)
+				entrance_outside_pos = Vector3(entry_x, 0.0, r_center.z + cur_half_d + 3.2)
+				_create_room_floor(Vector3(entry_x, 0.0, r_center.z + cur_half_d + 2.1), 3.4, 4.2, r_node)
+
+			if doors_south.is_empty():
+				if not bool(r_data.get("open_south", false)):
+					_create_wall(Vector3(r_center.x, WALL_H * 0.5, r_center.z + cur_half_d), Vector3(cur_w, WALL_H, WALL_T), r_node)
+			else:
+				for d in doors_south:
+					var dw: float = float(d.get("width", 2.8))
+					var dx: float = float(d.get("x", r_center.x))
+					var left_l := (dx - dw * 0.5) - (r_center.x - cur_half_w)
+					if left_l > 0.05:
+						_create_wall(Vector3(r_center.x - cur_half_w + left_l * 0.5, WALL_H * 0.5, r_center.z + cur_half_d), Vector3(left_l, WALL_H, WALL_T), r_node)
+					var right_l := (r_center.x + cur_half_w) - (dx + dw * 0.5)
+					if right_l > 0.05:
+						_create_wall(Vector3(r_center.x + cur_half_w - right_l * 0.5, WALL_H * 0.5, r_center.z + cur_half_d), Vector3(right_l, WALL_H, WALL_T), r_node)
+					var door := DoorController.new()
+					door.position = Vector3(dx, 0.0, r_center.z + cur_half_d)
+					door.setup(dw, Color("#27ae60"), false)
+					r_node.add_child(door)
+					active_doors.append(door)
+
+			# West Wall (Left side)
+			if doors_west.is_empty():
+				if not bool(r_data.get("open_west", false)):
+					_create_wall(Vector3(r_center.x - cur_half_w, WALL_H * 0.5, r_center.z), Vector3(WALL_T, WALL_H, cur_d), r_node)
+			else:
+				for d in doors_west:
+					var dw: float = float(d.get("width", 2.8))
+					var dz: float = float(d.get("z", r_center.z))
+					var north_l := (dz - dw * 0.5) - (r_center.z - cur_half_d)
+					if north_l > 0.05:
+						_create_wall(Vector3(r_center.x - cur_half_w, WALL_H * 0.5, r_center.z - cur_half_d + north_l * 0.5), Vector3(WALL_T, WALL_H, north_l), r_node)
+					var south_l := (r_center.z + cur_half_d) - (dz + dw * 0.5)
+					if south_l > 0.05:
+						_create_wall(Vector3(r_center.x - cur_half_w, WALL_H * 0.5, r_center.z + cur_half_d - south_l * 0.5), Vector3(WALL_T, WALL_H, south_l), r_node)
+					var door := DoorController.new()
+					door.position = Vector3(r_center.x - cur_half_w, 0.0, dz)
+					door.rotation_degrees.y = 90.0
+					door.setup(dw, Color("#27ae60"), false)
+					r_node.add_child(door)
+					active_doors.append(door)
+
+			# East Wall (Right side)
+			if doors_east.is_empty():
+				if not bool(r_data.get("open_east", false)):
+					_create_wall(Vector3(r_center.x + cur_half_w, WALL_H * 0.5, r_center.z), Vector3(WALL_T, WALL_H, cur_d), r_node)
+			else:
+				for d in doors_east:
+					var dw: float = float(d.get("width", 2.8))
+					var dz: float = float(d.get("z", r_center.z))
+					var north_l := (dz - dw * 0.5) - (r_center.z - cur_half_d)
+					if north_l > 0.05:
+						_create_wall(Vector3(r_center.x + cur_half_w, WALL_H * 0.5, r_center.z - cur_half_d + north_l * 0.5), Vector3(WALL_T, WALL_H, north_l), r_node)
+					var south_l := (r_center.z + cur_half_d) - (dz + dw * 0.5)
+					if south_l > 0.05:
+						_create_wall(Vector3(r_center.x + cur_half_w, WALL_H * 0.5, r_center.z + cur_half_d - south_l * 0.5), Vector3(WALL_T, WALL_H, south_l), r_node)
+					var door := DoorController.new()
+					door.position = Vector3(r_center.x + cur_half_w, 0.0, dz)
+					door.rotation_degrees.y = 90.0
+					door.setup(dw, Color("#27ae60"), false)
+					r_node.add_child(door)
+					active_doors.append(door)
+
+		# 6. Target Items (Multi-Item Collectibles in Cabinets only - no clutter items per user instruction)
+		for it in r_data.get("items", []):
+			var it_id: String = String(it.get("id", ""))
+			var it_raw: Array = it.get("pos", [0.0, 0.0, 0.0])
+			var it_pos := r_center + Vector3(float(it_raw[0]), float(it_raw[1]), float(it_raw[2]))
+
+			var is_target_item: bool = (it_id in ["candy", "ball", "bat", "game", "bear", "trophy", "gem", "robot", "dice"]) or bool(it.get("is_target", false)) or bool(it.get("is_main_candy", false)) or it.has("container")
+			if it_id == "key" or (bool(it.get("collectible", false)) and it_id == "key"):
+				var key := KeyPickup.new()
+				key.setup(it_pos)
+				key.key_collected.connect(_on_key_collected)
+				r_node.add_child(key)
+				active_keys.append(key)
+			elif is_target_item:
+				# Target Item to find - ALWAYS placed inside a distinct 3D cabinet (no ATM!)
+				var it_type: String = String(it.get("type", it_id))
+				var it_col := Color(it.get("color", "#e84393"))
+				var cabinet_palette := ["#2980b9", "#8e44ad", "#d35400", "#16a085", "#c0392b", "#27ae60", "#2c3e50", "#b9770e"]
+				var cabinet_models := ["bookcaseClosedDoors", "bookcaseClosedWide", "cabinetTelevisionDoors", "kitchenCabinet", "kitchenCabinetDrawer"]
+				var idx_c: int = target_items.size()
+				var default_c_col: String = cabinet_palette[idx_c % cabinet_palette.size()]
+				var default_c_mod: String = cabinet_models[idx_c % cabinet_models.size()]
+				var raw_c_col: String = String(it.get("container_color", ""))
+				if raw_c_col.is_empty():
+					raw_c_col = default_c_col
+				var raw_c_mod: String = String(it.get("container_model", ""))
+				if raw_c_mod.is_empty():
+					raw_c_mod = default_c_mod
+				var item_entry := {
+					"id": "%s_%d" % [it_type, target_items.size()],
+					"type": it_type,
+					"pos": it_pos,
+					"rot_y": float(it.get("rot_y", 180.0)),
+					"color": it_col,
+					"container": "cupboard",
+					"container_model": raw_c_mod,
+					"container_scale": float(it.get("container_scale", 2.6)),
+					"container_color": raw_c_col,
+					"requires_key": bool(it.get("requires_key", false))
+				}
+				var info := CollectibleItem.get_item_info(it_type)
+				item_entry["name"] = String(it.get("name", info.get("name", "Toy")))
+				item_entry["icon"] = String(it.get("icon", info.get("icon", "🎁")))
+				target_items.append(item_entry)
+				_build_item_cupboard(item_entry, r_node)
+
+		# 7. Security Cameras
+		for c_info in r_data.get("cameras", []):
+			var raw_c_pos: Array = c_info.get("pos", [-6.8, 2.35, 0.0])
+			var raw_dir: Array = c_info.get("inward_dir", [1.0, 0.0, 0.0])
+			var c_pos := r_center + Vector3(float(raw_c_pos[0]), float(raw_c_pos[1]), float(raw_c_pos[2]))
+			var wall_yaw := atan2(float(raw_dir[0]), float(raw_dir[2]))
+			var c_range: float = float(c_info.get("vision_range", 7.8))
+			var c_angle: float = float(c_info.get("vision_angle", 38.0))
+			var cam := SecurityCamera.new()
+			cam.position = c_pos
+			cam.setup(wall_yaw, c_range, c_angle)
+			cam.player_spotted.connect(_trigger_fail)
+			r_node.add_child(cam)
+			active_cameras.append(cam)
+
+		# 8. Granny Guards
+		for g_info in r_data.get("guards", []):
+			var waypoints: Array[Vector3] = []
+			var raw_wps: Array = g_info.get("waypoints", [])
+			if raw_wps.size() >= 2:
+				for wp_raw in raw_wps:
+					waypoints.append(r_center + Vector3(float(wp_raw[0]), float(wp_raw[1]), float(wp_raw[2])))
+			else:
+				waypoints = [r_center + Vector3(-3.5, 0.0, 0.0), r_center + Vector3(3.5, 0.0, 0.0)]
+
+			var g_range: float = float(g_info.get("vision_range", 3.8))
+			var g_angle: float = float(g_info.get("vision_angle", 32.0))
+			var g_speed: float = float(g_info.get("speed", 3.0))
+			var tint := Color(g_info.get("tint", "#d63031"))
+
+			var guard := GuardController.new()
+			guard.setup(waypoints, g_range, g_angle, g_speed, tint)
+			guard.player_spotted.connect(_trigger_fail)
+			r_node.add_child(guard)
+			active_guards.append(guard)
+
+		# Clean Room Layout: place entrance/exit pad OUTSIDE the south entrance door where the player comes from and exits to!
+		if r_idx == 0:
+			_create_spawn_marker(entrance_door_pos + Vector3(0.0, 0.0, 1.8), r_node)
+
+	# Outdoor Scenery: Lush lawn and 3D trees surrounding the house/hall on all 4 perimeter sides
+	var min_x := -house_w * 0.5
+	var max_x := house_w * 0.5
+	var min_z := -float(rooms.size() - 1) * room_depth - room_depth * 0.5
+	var max_z := room_depth * 0.5
+
+	for r_data in rooms:
+		var c := Vector3.ZERO
+		if r_data.has("center"):
+			var raw_c: Array = r_data["center"]
+			c = Vector3(float(raw_c[0]), 0.0, float(raw_c[2]))
+		var w: float = float(r_data.get("width", house_w))
+		var d: float = float(r_data.get("depth", room_depth))
+		min_x = minf(min_x, c.x - w * 0.5)
+		max_x = maxf(max_x, c.x + w * 0.5)
+		min_z = minf(min_z, c.z - d * 0.5)
+		max_z = maxf(max_z, c.z + d * 0.5)
+
+	var total_w := max_x - min_x
+	var total_d := max_z - min_z
+	OutdoorScenery.build_outdoor_trees(level_root, total_w, total_d, min_z, max_z, wall_colliders, entrance_door_pos.x)
+
+	# Level Safety Validation: Ensure player spawn, cabinets, and guard waypoints never clip into walls!
+	_validate_level_safety()
+
+func _spawn_level_powerups() -> void:
+	# Powerups are only available in the bottom HUD bar by spending coins (not spawned on levels)
+	pass
+
+func _validate_level_safety() -> void:
+	# 1. Validate Player Spawn Position: Must never be inside or clipping any wall
+	if is_instance_valid(player_root):
+		var safe_pos := _find_nearest_safe_floor(player_spawn_pos, 0.55)
+		if safe_pos.distance_to(player_spawn_pos) > 0.05:
+			print("SAFETY_VALIDATOR: Player spawn at ", player_spawn_pos, " was clipping wall! Auto-adjusted to safe pos: ", safe_pos)
+			player_spawn_pos = safe_pos
+			player_root.position = safe_pos
+			var marker := level_root.get_node_or_null("SpawnMarker")
+			if is_instance_valid(marker):
+				marker.position = safe_pos
+
+	# 2. Validate Cabinet Positions: Must not be embedded inside walls (skip cabinet's own AABB)
+	for c_entry in active_containers:
+		var c_pos: Vector3 = c_entry.get("pos", Vector3.ZERO)
+		var own_aabb: AABB = c_entry.get("collider_aabb", AABB())
+		for aabb in wall_colliders:
+			if aabb == own_aabb:
+				continue
+			if aabb.grow(0.15).has_point(c_pos):
+				var c := aabb.get_center()
+				var diff := c_pos - c
+				if absf(diff.x) > absf(diff.z):
+					c_pos.x = c.x + signf(diff.x) * (aabb.size.x * 0.5 + 0.45)
+				else:
+					c_pos.z = c.z + signf(diff.z) * (aabb.size.z * 0.5 + 0.45)
+				c_entry["pos"] = c_pos
+				c_entry["collider_aabb"] = AABB(c_pos - own_aabb.size * 0.5 + Vector3(0.0, own_aabb.size.y * 0.5, 0.0), own_aabb.size)
+				if is_instance_valid(c_entry.get("root")):
+					c_entry["root"].position = c_pos
+				if is_instance_valid(c_entry.get("item_node")):
+					c_entry["item_node"].position.x = c_pos.x
+					c_entry["item_node"].position.z = c_pos.z
+				print("SAFETY_VALIDATOR: Cabinet for ", c_entry.get("id"), " adjusted to ", c_pos)
+
+	# 2b. Validate Key Positions: Must not be inside partition walls
+	for key in active_keys:
+		if is_instance_valid(key):
+			var safe_k := _find_nearest_safe_floor(key.position, 0.55)
+			if safe_k.distance_to(key.position) > 0.05:
+				key.position = safe_k
+
+	# 3. Validate Guard Waypoints: Must not be inside walls
+	for guard in active_guards:
+		if is_instance_valid(guard):
+			for w_i in range(guard.waypoints.size()):
+				var wp := guard.waypoints[w_i]
+				var safe_wp := _find_nearest_safe_floor(wp, 0.45)
+				if safe_wp.distance_to(wp) > 0.05:
+					print("SAFETY_VALIDATOR: Guard waypoint ", wp, " adjusted to ", safe_wp)
+					guard.waypoints[w_i] = safe_wp
+
+	# 4. Validate Item Distance from Player Starting Position:
+	# Ensure no item cabinet is ever placed near the player's starting spawn point (must be at least 7.0m away!)
+	for it_data in target_items:
+		var c_pos: Vector3 = it_data.get("pos", Vector3.ZERO)
+		if c_pos.distance_to(player_spawn_pos) < 7.0:
+			var far_z := -absf(c_pos.z) if c_pos.z > 0.0 else c_pos.z - 4.0
+			var safe_pos := Vector3(c_pos.x, 0.0, far_z)
+			safe_pos = _find_nearest_safe_floor(safe_pos, 0.6)
+			it_data["pos"] = safe_pos
+			if is_instance_valid(it_data.get("root")):
+				it_data["root"].position = safe_pos
+			print("SAFETY_VALIDATOR: Item ", it_data.get("id"), " was too close to starting spawn! Relocated to safe pos: ", safe_pos)
+
+func _find_nearest_safe_floor(origin: Vector3, min_clearance: float = 0.5) -> Vector3:
+	var is_blocked := false
+	for aabb in wall_colliders:
+		if aabb.grow(min_clearance).has_point(origin):
+			is_blocked = true
+			break
+	if not is_blocked:
+		return origin
+
+	# Spiral search in X/Z to find nearest safe open floor point
+	for radius_step in range(1, 25):
+		var r := float(radius_step) * 0.35
+		for angle_deg in range(0, 360, 30):
+			var rad := deg_to_rad(float(angle_deg))
+			var candidate := origin + Vector3(cos(rad) * r, 0.0, sin(rad) * r)
+			var cand_blocked := false
+			for aabb in wall_colliders:
+				if aabb.grow(min_clearance).has_point(candidate):
+					cand_blocked = true
+					break
+			if not cand_blocked:
+				return candidate
+	return origin
+
+func _create_floor_pad(pos: Vector3, parent: Node3D) -> Node3D:
+	var pad := Node3D.new()
+	pad.name = "FloorButtonPad"
+	pad.position = pos
+
+	var ring := MeshInstance3D.new()
+	var r_mesh := CylinderMesh.new()
+	r_mesh.top_radius = 0.55
+	r_mesh.bottom_radius = 0.55
+	r_mesh.height = 0.02
+	ring.mesh = r_mesh
+	var r_mat := StandardMaterial3D.new()
+	r_mat.albedo_color = Color("#e84393")
+	ring.material_override = r_mat
+	pad.add_child(ring)
+
+	var core := MeshInstance3D.new()
+	var c_mesh := CylinderMesh.new()
+	c_mesh.top_radius = 0.44
+	c_mesh.bottom_radius = 0.44
+	c_mesh.height = 0.025
+	core.mesh = c_mesh
+	core.position = Vector3(0.0, 0.005, 0.0)
+	var c_mat := StandardMaterial3D.new()
+	c_mat.albedo_color = Color.WHITE
+	c_mat.emission_enabled = true
+	c_mat.emission = Color.WHITE
+	c_mat.emission_energy_multiplier = 0.3
+	core.material_override = c_mat
+	pad.add_child(core)
+
+	parent.add_child(pad)
+	return pad
+
+func _build_item_cupboard(item_dict: Dictionary, parent: Node3D) -> void:
+	var pos: Vector3 = item_dict["pos"]
+	var rot_y: float = float(item_dict.get("rot_y", 180.0))
+	var container_model: String = String(item_dict.get("container_model", "bookcaseClosedDoors"))
+	var container_scale: float = float(item_dict.get("container_scale", 2.5))
+	var container_color_str: String = String(item_dict.get("container_color", "#2980b9"))
+	if container_color_str.is_empty():
+		container_color_str = "#2980b9"
+	var base_cab_col := Color(container_color_str)
+	var req_key: bool = bool(item_dict.get("requires_key", false))
+	candy_pos = pos
+	candy_spawn_pos = pos
+	is_cupboard_open = false
+
+	# 1. 3D Cabinet Container (Always a real 3D Cabinet with Doors, Shelves & Handles - NO ATM!)
+	var c_root := Node3D.new()
+	c_root.name = "Container_%s" % item_dict["id"]
+	c_root.position = pos
+	parent.add_child(c_root)
+
+	var scale_factor: float = container_scale / 2.1
+	var cup_h: float = 2.2 * scale_factor
+	var cup_w: float = 1.65 * scale_factor
+	var cup_d: float = 0.88 * scale_factor
+	if container_model == "bookcaseClosedWide" or container_model == "cabinetTelevisionDoors":
+		cup_w = 1.95 * scale_factor
+	elif container_model == "kitchenCabinet" or container_model == "kitchenCabinetDrawer":
+		cup_w = 1.50 * scale_factor
+		cup_h = 1.95 * scale_factor
+
+	var cup_size := Vector3(cup_w, cup_h, cup_d)
+	if absf(rot_y - 90.0) < 15.0 or absf(rot_y + 90.0) < 15.0 or absf(rot_y - 270.0) < 15.0:
+		cup_size = Vector3(cup_d, cup_h, cup_w)
+	var cab_aabb := AABB(pos - cup_size * 0.5 + Vector3(0.0, cup_h * 0.5, 0.0), cup_size)
+
+	var door_left: Node3D = null
+	var door_right: Node3D = null
+
+	# Rich 3D Architectural Cabinet (Crown Molding, Two-Tone Doors, Recessed Panels & Brass Handles)
+	# Distinct 3D cabinet geometry per container_model so every cabinet looks like a real 3D cabinet!
+	var cab_facade := Node3D.new()
+	cab_facade.name = "CabinetFacade"
+	var facade_yaw := 0.0
+	if absf(rot_y - 90.0) < 20.0:
+		facade_yaw = 90.0
+	elif absf(rot_y + 90.0) < 20.0 or absf(rot_y - 270.0) < 20.0:
+		facade_yaw = -90.0
+	cab_facade.rotation_degrees.y = facade_yaw
+	c_root.add_child(cab_facade)
+
+	var frame_mat := StandardMaterial3D.new()
+	frame_mat.albedo_color = base_cab_col.darkened(0.32)
+	frame_mat.roughness = 0.42
+	frame_mat.metallic = 0.1
+
+	var door_mat := StandardMaterial3D.new()
+	door_mat.albedo_color = base_cab_col.lightened(0.16)
+	door_mat.roughness = 0.32
+	door_mat.metallic = 0.12
+
+	var panel_mat := StandardMaterial3D.new()
+	panel_mat.albedo_color = base_cab_col.lightened(0.32)
+	panel_mat.roughness = 0.35
+
+	var seam_mat := StandardMaterial3D.new()
+	seam_mat.albedo_color = base_cab_col.darkened(0.58)
+	seam_mat.roughness = 0.6
+
+	var brass_mat := StandardMaterial3D.new()
+	brass_mat.albedo_color = Color("#f1c40f")
+	brass_mat.metallic = 0.88
+	brass_mat.roughness = 0.18
+	brass_mat.emission_enabled = true
+	brass_mat.emission = Color("#f39c12")
+	brass_mat.emission_energy_multiplier = 0.25
+
+	# Cabinet Outer Body Box & Top Crown Cornice
+	var body_mesh := MeshInstance3D.new()
+	var body_box := BoxMesh.new()
+	body_box.size = Vector3(cup_w, cup_h, cup_d * 0.82)
+	body_mesh.mesh = body_box
+	body_mesh.position = Vector3(0.0, cup_h * 0.5, -0.04)
+	body_mesh.material_override = frame_mat
+	cab_facade.add_child(body_mesh)
+
+	var crown_mesh := MeshInstance3D.new()
+	var crown_box := BoxMesh.new()
+	crown_box.size = Vector3(cup_w + 0.18, 0.16, cup_d + 0.16)
+	crown_mesh.mesh = crown_box
+	crown_mesh.position = Vector3(0.0, cup_h + 0.06, 0.0)
+	crown_mesh.material_override = frame_mat
+	cab_facade.add_child(crown_mesh)
+
+	# Model-specific top accent (e.g. top drawer for kitchenCabinetDrawer or raised pediment for bookcaseClosedWide)
+	if container_model == "kitchenCabinetDrawer" or container_model == "cabinetTelevisionDoors":
+		var top_drawer := MeshInstance3D.new()
+		var td_box := BoxMesh.new()
+		td_box.size = Vector3(cup_w - 0.18, 0.32, 0.10)
+		top_drawer.mesh = td_box
+		top_drawer.position = Vector3(0.0, cup_h - 0.22, cup_d * 0.39)
+		top_drawer.material_override = panel_mat
+		cab_facade.add_child(top_drawer)
+
+		var td_knob := MeshInstance3D.new()
+		var td_kbox := BoxMesh.new()
+		td_kbox.size = Vector3(0.28, 0.06, 0.10)
+		td_knob.mesh = td_kbox
+		td_knob.position = Vector3(0.0, cup_h - 0.22, cup_d * 0.45)
+		td_knob.material_override = brass_mat
+		cab_facade.add_child(td_knob)
+	elif container_model == "bookcaseClosedWide":
+		var pediment := MeshInstance3D.new()
+		var ped_box := BoxMesh.new()
+		ped_box.size = Vector3(cup_w * 0.72, 0.18, cup_d * 0.85)
+		pediment.mesh = ped_box
+		pediment.position = Vector3(0.0, cup_h + 0.18, 0.0)
+		pediment.material_override = door_mat
+		cab_facade.add_child(pediment)
+
+	var plinth_mesh := MeshInstance3D.new()
+	var plinth_box := BoxMesh.new()
+	plinth_box.size = Vector3(cup_w + 0.12, 0.14, cup_d + 0.10)
+	plinth_mesh.mesh = plinth_box
+	plinth_mesh.position = Vector3(0.0, 0.07, 0.0)
+	plinth_mesh.material_override = frame_mat
+	cab_facade.add_child(plinth_mesh)
+
+	var front_z: float = cup_d * 0.38
+	var door_w: float = (cup_w - 0.22) * 0.48
+	var has_top_drawer: bool = (container_model == "kitchenCabinetDrawer" or container_model == "cabinetTelevisionDoors")
+	var door_h: float = (cup_h - 0.64) if has_top_drawer else (cup_h - 0.28)
+	var door_center_y: float = (cup_h * 0.5 - 0.16) if has_top_drawer else (cup_h * 0.5)
+
+	# Left Hinged Cabinet Door
+	var left_hinge := Node3D.new()
+	left_hinge.name = "FacadeDoorLeft"
+	left_hinge.position = Vector3(-cup_w * 0.5 + 0.10, door_center_y, front_z)
+	cab_facade.add_child(left_hinge)
+
+	var l_door_mesh := MeshInstance3D.new()
+	var l_door_box := BoxMesh.new()
+	l_door_box.size = Vector3(door_w, door_h, 0.08)
+	l_door_mesh.mesh = l_door_box
+	l_door_mesh.position = Vector3(door_w * 0.5, 0.0, 0.04)
+	l_door_mesh.material_override = door_mat
+	left_hinge.add_child(l_door_mesh)
+
+	var l_panel_mesh := MeshInstance3D.new()
+	var l_panel_box := BoxMesh.new()
+	l_panel_box.size = Vector3(door_w * 0.72, door_h * 0.76, 0.04)
+	l_panel_mesh.mesh = l_panel_box
+	l_panel_mesh.position = Vector3(door_w * 0.5, 0.0, 0.08)
+	l_panel_mesh.material_override = panel_mat
+	left_hinge.add_child(l_panel_mesh)
+
+	var l_handle := MeshInstance3D.new()
+	var handle_box := BoxMesh.new()
+	handle_box.size = Vector3(0.08, 0.42, 0.12)
+	l_handle.mesh = handle_box
+	l_handle.position = Vector3(door_w - 0.12, 0.0, 0.12)
+	l_handle.material_override = brass_mat
+	left_hinge.add_child(l_handle)
+
+	# Right Hinged Cabinet Door
+	var right_hinge := Node3D.new()
+	right_hinge.name = "FacadeDoorRight"
+	right_hinge.position = Vector3(cup_w * 0.5 - 0.10, door_center_y, front_z)
+	cab_facade.add_child(right_hinge)
+
+	var r_door_mesh := MeshInstance3D.new()
+	r_door_mesh.mesh = l_door_box
+	r_door_mesh.position = Vector3(-door_w * 0.5, 0.0, 0.04)
+	r_door_mesh.material_override = door_mat
+	right_hinge.add_child(r_door_mesh)
+
+	var r_panel_mesh := MeshInstance3D.new()
+	r_panel_mesh.mesh = l_panel_box
+	r_panel_mesh.position = Vector3(-door_w * 0.5, 0.0, 0.08)
+	r_panel_mesh.material_override = panel_mat
+	right_hinge.add_child(r_panel_mesh)
+
+	var r_handle := MeshInstance3D.new()
+	r_handle.mesh = handle_box
+	r_handle.position = Vector3(-door_w + 0.12, 0.0, 0.12)
+	r_handle.material_override = brass_mat
+	right_hinge.add_child(r_handle)
+
+	# Dark vertical center door seam strip
+	var seam_mesh := MeshInstance3D.new()
+	var seam_box := BoxMesh.new()
+	seam_box.size = Vector3(0.05, door_h, 0.09)
+	seam_mesh.mesh = seam_box
+	seam_mesh.position = Vector3(0.0, door_center_y, front_z + 0.045)
+	seam_mesh.material_override = seam_mat
+	cab_facade.add_child(seam_mesh)
+
+	door_left = left_hinge
+	door_right = right_hinge
+
+	# 3D Golden Padlock & Floating "🔒 KEY REQUIRED" Badge when requires_key is true!
+	var lock_badge: Label3D = null
+	var padlock_node: Node3D = null
+	if req_key:
+		padlock_node = Node3D.new()
+		padlock_node.name = "CabinetPadlock"
+		padlock_node.position = Vector3(0.0, door_center_y, front_z + 0.18)
+		cab_facade.add_child(padlock_node)
+
+		var lock_body := MeshInstance3D.new()
+		var lb_box := BoxMesh.new()
+		lb_box.size = Vector3(0.38, 0.40, 0.16)
+		lock_body.mesh = lb_box
+		lock_body.material_override = brass_mat
+		padlock_node.add_child(lock_body)
+
+		var shackle := MeshInstance3D.new()
+		var sh_torus := TorusMesh.new()
+		sh_torus.inner_radius = 0.09
+		sh_torus.outer_radius = 0.16
+		shackle.mesh = sh_torus
+		shackle.position = Vector3(0.0, 0.24, 0.0)
+		shackle.rotation_degrees.x = 90.0
+		shackle.material_override = brass_mat
+		padlock_node.add_child(shackle)
+
+		lock_badge = Label3D.new()
+		lock_badge.text = "🔒 KEY REQUIRED"
+		lock_badge.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		if game_title_font != null:
+			lock_badge.font = game_title_font
+		lock_badge.font_size = 46
+		lock_badge.outline_size = 14
+		lock_badge.outline_modulate = Color.BLACK
+		lock_badge.modulate = Color("#ff7675")
+		lock_badge.position = Vector3(0.0, cup_h + 0.45, 0.65)
+		c_root.add_child(lock_badge)
+
+	# 2. 3D Floating Target Item Beacon & Interaction Prompt above Cabinet
+	var beacon := Node3D.new()
+	beacon.name = "ItemBeacon"
+	beacon.position = Vector3(0.0, cup_h + 1.05, 0.45)
+	c_root.add_child(beacon)
+
+	var icon_label := Label3D.new()
+	icon_label.text = "%s" % item_dict.get("icon", "🎁")
+	icon_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	icon_label.font_size = 46
+	icon_label.outline_size = 12
+	icon_label.outline_modulate = Color.BLACK
+	beacon.add_child(icon_label)
+
+	var prompt := Label3D.new()
+	prompt.text = "🔒 KEY REQUIRED! FIND 🔑 KEY!" if req_key else "🚪 [ OPEN CABINET ]"
+	prompt.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	if game_title_font != null:
+		prompt.font = game_title_font
+	prompt.font_size = 40
+	prompt.outline_size = 14
+	prompt.outline_modulate = Color.BLACK
+	prompt.modulate = Color("#ff7675") if req_key else Color("#ffeaa7")
+	prompt.position = Vector3(0.0, cup_h + 1.55, 0.55)
+	prompt.visible = false
+	c_root.add_child(prompt)
+
+	# 3. Miniature Item placed INSIDE the cupboard (small cute size!)
+	var mini_item := CollectibleItem.create_item_visual(item_dict["type"], item_dict["color"])
+	mini_item.position = pos + Vector3(0.0, cup_h * 0.42, 0.0)
+	mini_item.scale = Vector3(0.1, 0.1, 0.1)
+	mini_item.visible = false
+	parent.add_child(mini_item)
+
+	# Backwards-compatibility references
+	cupboard_root = c_root
+	cupboard_door_left = door_left
+	cupboard_door_right = door_right
+	cupboard_prompt = prompt
+	candy_node = mini_item
+
+	var entry := {
+		"id": item_dict["id"],
+		"name": item_dict["name"],
+		"icon": item_dict["icon"],
+		"pos": pos,
+		"root": c_root,
+		"collider_aabb": cab_aabb,
+		"door_left": door_left,
+		"door_right": door_right,
+		"beacon": beacon,
+		"prompt": prompt,
+		"lock_badge": lock_badge,
+		"padlock": padlock_node,
+		"requires_key": req_key,
+		"item_node": mini_item,
+		"is_open": false,
+		"collected": false
+	}
+	active_containers.append(entry)
+
+func _apply_custom_container_color(inst: Node3D, custom_color: Color) -> void:
+	for found in inst.find_children("*", "MeshInstance3D", true, false):
+		var mi := found as MeshInstance3D
+		if mi.mesh == null:
+			continue
+		for s in mi.mesh.get_surface_count():
+			var orig = mi.get_active_material(s)
+			if orig == null:
+				orig = mi.mesh.surface_get_material(s)
+			var mname: String = (orig as Resource).resource_name.to_lower() if (orig is Resource) else ""
+			var mi_name: String = mi.name.to_lower()
+			var mat := StandardMaterial3D.new()
+			if mname.contains("metal") or mi_name.contains("handle") or mname.contains("gold"):
+				mat.albedo_color = Color("#f1c40f") # Polished golden brass hardware
+				mat.metallic = 0.85
+				mat.roughness = 0.22
+			elif mi_name.contains("door") or mi_name.contains("drawer"):
+				mat.albedo_color = custom_color.lightened(0.18) # Lighter contrasting cabinet doors
+				mat.metallic = 0.12
+				mat.roughness = 0.32
+			elif s > 0:
+				mat.albedo_color = custom_color.lightened(0.28) # Shelves & inner trim
+				mat.roughness = 0.38
+			else:
+				mat.albedo_color = custom_color.darkened(0.28) # Rich darker outer cabinet frame
+				mat.metallic = 0.12
+				mat.roughness = 0.40
+			mi.set_surface_override_material(s, mat)
+
+func _build_open_item(item_dict: Dictionary, parent: Node3D) -> void:
+	var pos: Vector3 = item_dict["pos"]
+	var mini_item := CollectibleItem.create_item_visual(item_dict["type"], item_dict["color"])
+	mini_item.position = pos + Vector3(0.0, 0.35, 0.0)
+	parent.add_child(mini_item)
+
+	var entry := {
+		"id": item_dict["id"],
+		"name": item_dict["name"],
+		"icon": item_dict["icon"],
+		"pos": pos,
+		"base_y": pos.y + 0.35,
+		"node": mini_item,
+		"rot_speed": 2.2,
+		"collected": false
+	}
+	active_open_items.append(entry)
+
+func _build_candy(pos: Vector3, color: Color, parent: Node3D) -> void:
+	var item_entry := {
+		"id": "candy_%d" % target_items.size(),
+		"type": "candy",
+		"name": "Candy",
+		"icon": "🍭",
+		"pos": pos,
+		"color": color,
+		"container": "cupboard"
+	}
+	target_items.append(item_entry)
+	_build_item_cupboard(item_entry, parent)
+
+func _on_key_collected() -> void:
+	player_has_key = true
+	if SoundManager != null:
+		SoundManager.play_sfx("key")
+	if SignalHub != null:
+		SignalHub.emit_key_collected()
+	_show_powerup_toast("KEY COLLECTED! LOCKED CABINET UNLOCKED!", Color("#f1c40f"))
+
+	for c in active_containers:
+		if bool(c.get("requires_key", false)) and not c["is_open"]:
+			if is_instance_valid(c.get("lock_badge")):
+				c["lock_badge"].text = "UNLOCKED!"
+				c["lock_badge"].modulate = Color("#2ecc71")
+			if is_instance_valid(c.get("padlock")):
+				c["padlock"].queue_free()
+			if is_instance_valid(c.get("prompt")):
+				c["prompt"].text = "[ OPEN CABINET ]"
+				c["prompt"].modulate = Color("#2ecc71")
+
+func _open_container_and_collect(c: Dictionary) -> void:
+	if c["is_open"]:
+		return
+	if bool(c.get("requires_key", false)) and not player_has_key:
+		return
+	c["is_open"] = true
+	c["collected"] = true
+	is_cupboard_open = true
+	if SoundManager != null:
+		SoundManager.play_sfx("cabinet")
+	if SignalHub != null:
+		SignalHub.emit_cabinet_opened(c.get("id", ""))
+
+	# Hide floating item beacon, prompt, and lock badge cleanly without zero-scale matrix errors
+	if is_instance_valid(c.get("beacon")):
+		c["beacon"].visible = false
+		c["beacon"].queue_free()
+	if is_instance_valid(c.get("lock_badge")):
+		c["lock_badge"].visible = false
+		c["lock_badge"].queue_free()
+	if is_instance_valid(c.get("padlock")):
+		c["padlock"].visible = false
+		c["padlock"].queue_free()
+	if is_instance_valid(c.get("prompt")):
+		c["prompt"].visible = false
+		c["prompt"].queue_free()
+
+	# Animate Cupboard Doors Swinging Open!
+	var tw := create_tween()
+	tw.set_parallel(true)
+	if is_instance_valid(c["door_left"]):
+		tw.tween_property(c["door_left"], "rotation:y", deg_to_rad(-110.0), 0.32).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if is_instance_valid(c["door_right"]):
+		tw.tween_property(c["door_right"], "rotation:y", deg_to_rad(110.0), 0.32).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+	# Immediately register item collection so there is zero delay or hang!
+	var item_node: Node3D = c["item_node"]
+	_on_item_collected(c["id"], c["name"], c["icon"], item_node)
+
+func _open_cupboard_and_collect() -> void:
+	if active_containers.size() > 0:
+		_open_container_and_collect(active_containers[0])
+
+func _create_spawn_marker(pos: Vector3, parent: Node3D) -> void:
+	var pad := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(2.4, 0.015, 1.6)
+	pad.mesh = box
+	pad.position = pos + Vector3(0.0, 0.01, 0.0)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color("#2c3e50")
+	pad.material_override = mat
+	parent.add_child(pad)
+
+	var border := MeshInstance3D.new()
+	var b_box := BoxMesh.new()
+	b_box.size = Vector3(2.55, 0.014, 1.75)
+	border.mesh = b_box
+	border.position = pos + Vector3(0.0, 0.008, 0.0)
+	var b_mat := StandardMaterial3D.new()
+	b_mat.albedo_color = Color("#f1c40f")
+	border.material_override = b_mat
+	spawn_marker_border_mat = b_mat
+	parent.add_child(border)
+
+	var label := Label3D.new()
+	label.text = "🚪 ENTRANCE / EXIT"
+	label.position = pos + Vector3(0.0, 0.02, 0.0)
+	label.rotation_degrees.x = -90.0
+	if game_title_font != null:
+		label.font = game_title_font
+	label.font_size = 28
+	label.modulate = Color("#ffeaa7")
+	label.outline_size = 8
+	label.outline_modulate = Color("#2d3436")
+	spawn_marker_label = label
+	parent.add_child(label)
+
+func _get_floor_tile_texture() -> ImageTexture:
+	if floor_tile_texture != null:
+		return floor_tile_texture
+
+	var size := 256
+	var img := Image.create(size, size, true, Image.FORMAT_RGBA8)
+	var base_col := Color("#5a7a94") # Crisp stylish slate-blue ceramic tile matching reference image
+	var grout_col := Color("#2c3e50") # Deep slate blue grout seam
+	var bevel_light := Color("#7d9cb6") # Soft top-left light highlight
+	var bevel_dark := Color("#41596e") # Soft bottom-right bevel shade
+
+	# Fill with base ceramic color with subtle natural texture grain
+	for y in range(size):
+		for x in range(size):
+			var noise_val := (sin(float(x) * 0.35) * cos(float(y) * 0.35)) * 0.025
+			var grain := (float((x * 37 + y * 17) % 19) / 19.0 - 0.5) * 0.02
+			var c := base_col
+			c.r = clampf(c.r + noise_val + grain, 0.0, 1.0)
+			c.g = clampf(c.g + noise_val + grain, 0.0, 1.0)
+			c.b = clampf(c.b + noise_val + grain, 0.0, 1.0)
+			img.set_pixel(x, y, c)
+
+	# Grout seams (outer 4 pixels on each border)
+	var border := 4
+	for x in range(size):
+		for b in range(border):
+			img.set_pixel(x, b, grout_col)
+			img.set_pixel(x, size - 1 - b, grout_col)
+	for y in range(size):
+		for b in range(border):
+			img.set_pixel(b, y, grout_col)
+			img.set_pixel(size - 1 - b, y, grout_col)
+
+	# 3D Bevel highlight (top and left inner border)
+	for x in range(border, size - border):
+		for b in range(border, border + 3):
+			img.set_pixel(x, b, bevel_light)
+	for y in range(border, size - border):
+		for b in range(border, border + 3):
+			img.set_pixel(b, y, bevel_light)
+
+	# 3D Bevel shade (bottom and right inner border)
+	for x in range(border, size - border):
+		for b in range(size - border - 3, size - border):
+			img.set_pixel(x, b, bevel_dark)
+	for y in range(border, size - border):
+		for b in range(size - border - 3, size - border):
+			img.set_pixel(b, y, bevel_dark)
+
+	img.generate_mipmaps()
+	floor_tile_texture = ImageTexture.create_from_image(img)
+	return floor_tile_texture
+
+var floor_tile_normal_tex: ImageTexture = null
+
+func _get_floor_tile_normal() -> ImageTexture:
+	if floor_tile_normal_tex != null:
+		return floor_tile_normal_tex
+
+	var size := 256
+	var img := Image.create(size, size, true, Image.FORMAT_RGBA8)
+	var flat_norm := Color(0.5, 0.5, 1.0)
+	var light_norm := Color(0.35, 0.35, 0.87)
+	var dark_norm := Color(0.65, 0.65, 0.87)
+	var grout_norm := Color(0.5, 0.5, 0.5)
+
+	img.fill(flat_norm)
+	var border := 4
+	for x in range(size):
+		for b in range(border):
+			img.set_pixel(x, b, grout_norm)
+			img.set_pixel(x, size - 1 - b, grout_norm)
+	for y in range(size):
+		for b in range(border):
+			img.set_pixel(b, y, grout_norm)
+			img.set_pixel(size - 1 - b, y, grout_norm)
+
+	for x in range(border, size - border):
+		for b in range(border, border + 3):
+			img.set_pixel(x, b, light_norm)
+	for y in range(border, size - border):
+		for b in range(border, border + 3):
+			img.set_pixel(b, y, light_norm)
+
+	for x in range(border, size - border):
+		for b in range(size - border - 3, size - border):
+			img.set_pixel(x, b, dark_norm)
+	for y in range(border, size - border):
+		for b in range(size - border - 3, size - border):
+			img.set_pixel(b, y, dark_norm)
+
+	img.generate_mipmaps()
+	floor_tile_normal_tex = ImageTexture.create_from_image(img)
+	return floor_tile_normal_tex
+
+var wall_mat: StandardMaterial3D = null
+var floor_tile_tex: Texture2D = null
+var floor_tile_norm: Texture2D = null
+
+func _get_wall_material() -> StandardMaterial3D:
+	if wall_mat != null:
+		return wall_mat
+	wall_mat = StandardMaterial3D.new()
+	wall_mat.albedo_color = Color("#E8E2D2") # Restored previous clean architectural cream/beige
+	wall_mat.roughness = 0.55
+	return wall_mat
+
+func _get_floor_material(width: float, depth: float) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = _get_floor_tile_texture()
+	mat.normal_enabled = true
+	mat.normal_texture = _get_floor_tile_normal()
+	mat.uv1_triplanar = true
+	mat.uv1_scale = Vector3(0.85, 0.85, 0.85) # ~1.18m square tiles matching reference
+	mat.roughness = 0.28
+	return mat
+
+func _create_room_floor(center: Vector3, width: float, depth: float, parent: Node3D) -> void:
+	var floor_mesh := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(width, 0.05, depth)
+	floor_mesh.mesh = box
+	floor_mesh.position = center + Vector3(0.0, -0.02, 0.0)
+	floor_mesh.material_override = _get_floor_material(width, depth)
+	parent.add_child(floor_mesh)
+
+func _create_wall(pos: Vector3, size: Vector3, parent: Node3D) -> void:
+	var wall := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = size
+	wall.mesh = box
+	wall.position = pos
+	wall.material_override = _get_wall_material()
+	parent.add_child(wall)
+
+	var aabb := AABB(pos - size * 0.5, size)
+	wall_colliders.append(aabb)
+
+func _create_interior_door(pos: Vector3, dw: float, col: Color, req_key: bool, parent: Node3D) -> DoorController:
+	var door := DoorController.new()
+	door.position = pos
+	door.setup(dw, col, req_key)
+	parent.add_child(door)
+	active_doors.append(door)
+	return door
+
+func _create_coin_pickup(pos: Vector3, reward: int, parent: Node3D) -> Node3D:
+	var coin := Node3D.new()
+	coin.name = "CoinPickup"
+	coin.position = pos + Vector3(0.0, 0.45, 0.0)
+
+	var mesh_inst := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.22
+	cyl.bottom_radius = 0.22
+	cyl.height = 0.06
+	mesh_inst.mesh = cyl
+	mesh_inst.rotation_degrees.x = 90.0
+
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color("#f1c40f")
+	mat.metallic = 0.8
+	mat.roughness = 0.2
+	mat.emission_enabled = true
+	mat.emission = Color("#f39c12")
+	mat.emission_energy_multiplier = 0.4
+	mesh_inst.material_override = mat
+	coin.add_child(mesh_inst)
+
+	parent.add_child(coin)
+	return coin
+
+func _build_player() -> void:
+	var p_info: Dictionary = active_level_data.get("characters", {}).get("player", {})
+	var p_pos_arr: Array = p_info.get("pos", [0.0, 0.0, 3.8])
+	player_spawn_pos = Vector3(float(p_pos_arr[0]), 0.0, float(p_pos_arr[2]))
+
+	player_root = Node3D.new()
+	player_root.name = "Player"
+	# Start player OUTSIDE the south entrance door and walk IN when level starts!
+	player_root.position = entrance_outside_pos
+	is_entering_level = true
+	level_root.add_child(player_root)
+
+	var boy_inst: Node3D = BOY_MODEL.instantiate() as Node3D
+	player_mesh = boy_inst
+	player_mesh.scale = Vector3.ONE * 0.55
+	player_mesh.rotation.y = PI
+	player_target_rotation = PI
+	player_root.add_child(player_mesh)
+
+	# Apply authentic skater texture to Player model (matching pink outfit in reference)
+	var skin_texture := load("res://assets/models/boys/Skins/skaterFemaleA.png") as Texture2D
+	if skin_texture != null:
+		for found in player_mesh.find_children("*", "MeshInstance3D", true, false):
+			var mesh_instance := found as MeshInstance3D
+			if mesh_instance.mesh == null:
+				continue
+			for surface in mesh_instance.mesh.get_surface_count():
+				var material := mesh_instance.get_active_material(surface)
+				var textured_material := StandardMaterial3D.new()
+				if material is StandardMaterial3D:
+					textured_material = (material as StandardMaterial3D).duplicate() as StandardMaterial3D
+				textured_material.albedo_texture = skin_texture
+				mesh_instance.set_surface_override_material(surface, textured_material)
+
+	# Load Boy animation clips
+	player_anim = player_mesh.find_child("AnimationPlayer", true, false) as AnimationPlayer
+	if player_anim == null:
+		player_anim = AnimationPlayer.new()
+		player_anim.name = "AnimationPlayer"
+		player_anim.root_node = NodePath("..")
+		player_mesh.add_child(player_anim)
+
+	_add_boy_animation("Idle", "res://assets/models/boys/Animations/idle.fbx", "Root|Idle")
+	_add_boy_animation("Run", "res://assets/models/boys/Animations/run.fbx", "Root|Run")
+	if player_anim.has_animation("Idle"):
+		player_anim.play("Idle")
+
+func _add_boy_animation(animation_name: String, scene_path: String, source_animation_name: String) -> void:
+	var animation_scene := load(scene_path) as PackedScene
+	if animation_scene == null or not is_instance_valid(player_anim):
+		return
+	var animation_root := animation_scene.instantiate()
+	var source_player := animation_root.find_child("AnimationPlayer", true, false) as AnimationPlayer
+	if source_player == null or not source_player.has_animation(source_animation_name):
+		animation_root.free()
+		return
+	var library: AnimationLibrary
+	if player_anim.has_animation_library(""):
+		library = player_anim.get_animation_library("")
+	else:
+		library = AnimationLibrary.new()
+		player_anim.add_animation_library("", library)
+	var animation := source_player.get_animation(source_animation_name).duplicate(true) as Animation
+	animation.loop_mode = Animation.LOOP_LINEAR
+	if library.has_animation(animation_name):
+		library.remove_animation(animation_name)
+	library.add_animation(animation_name, animation)
+	animation_root.free()
+
+	var cam_y: float = 27.5
+	var init_cam_x := player_spawn_pos.x * 0.75
+	if not active_level_data.is_empty():
+		var cam_p: Array = active_level_data.get("camera", {}).get("position", [init_cam_x, 27.5, player_spawn_pos.z + 4.5])
+		cam_y = float(cam_p[1])
+		init_cam_x = float(cam_p[0])
+	main_camera.position = Vector3(init_cam_x, cam_y, player_spawn_pos.z + 4.5)
+
+func _process(delta: float) -> void:
+	_update_powerups(delta)
+
+	if is_spotted or is_level_cleared:
+		return
+
+	# 1. Update Keys
+	for key in active_keys:
+		if is_instance_valid(key) and is_instance_valid(player_root):
+			key.update_animation(delta, player_root.position)
+
+	# 2. Update Floor Buttons & Props
+	var props_positions: Array[Vector3] = []
+	for prop in active_props:
+		if is_instance_valid(prop):
+			props_positions.append(prop.position)
+			if is_instance_valid(player_root):
+				prop.apply_push(player_root.position, PLAYER_SPEED, delta, wall_colliders)
+
+	for btn in active_buttons:
+		if is_instance_valid(btn) and is_instance_valid(player_root):
+			btn.check_activation(player_root.position, props_positions)
+
+	# 3. Laser Barriers eliminated (Guards are sole threat)
+
+	# 4. Update Doors
+	for door in active_doors:
+		if is_instance_valid(door) and is_instance_valid(player_root):
+			door.update_door(delta, player_root.position, player_has_key)
+
+	# 5. Update Security Cameras & Guards (Guards & Cameras cannot see invisible or entering player!)
+	var guard_colliders: Array[AABB] = wall_colliders.duplicate()
+	for d in active_doors:
+		if is_instance_valid(d) and not d.is_open:
+			guard_colliders.append(d.collider_aabb)
+
+	var hidden_from_enemies := is_player_invisible or is_entering_level or is_intro_cinematic_active
+	for cam in active_cameras:
+		if is_instance_valid(cam) and is_instance_valid(player_root):
+			cam.update_camera(delta, player_root.position, guard_colliders, hidden_from_enemies)
+
+	for guard in active_guards:
+		if is_instance_valid(guard) and is_instance_valid(player_root):
+			guard.update_guard(delta, player_root.position, guard_colliders, hidden_from_enemies)
+
+	# 6. Multi-Item Containers (Cupboards) & Open Pickups Interaction
+	for c in active_containers:
+		if not c["is_open"]:
+			var dist := player_root.position.distance_to(c["pos"]) if is_instance_valid(player_root) else 999.0
+			var needs_key: bool = bool(c.get("requires_key", false)) and not player_has_key
+			if is_instance_valid(c.get("beacon")):
+				c["beacon"].position.y = 2.95 + sin(Time.get_ticks_msec() * 0.005) * 0.10
+			if is_instance_valid(c.get("lock_badge")):
+				c["lock_badge"].position.y = 2.35 + sin(Time.get_ticks_msec() * 0.006) * 0.08
+			if is_instance_valid(c["prompt"]):
+				c["prompt"].visible = (dist < 4.5)
+				var pulse := sin(Time.get_ticks_msec() * 0.006) * 0.08
+				c["prompt"].position.y = 3.85 + pulse
+				if needs_key:
+					c["prompt"].text = "KEY REQUIRED! COLLECT KEY!"
+					c["prompt"].modulate = Color("#ff7675")
+			if is_instance_valid(player_root) and dist < 2.15:
+				if not needs_key:
+					_open_container_and_collect(c)
+				elif SoundManager != null:
+					SoundManager.play_sfx("locked")
+
+	for it_data in active_open_items:
+		if not it_data["collected"] and is_instance_valid(it_data["node"]):
+			it_data["node"].rotation.y += delta * float(it_data.get("rot_speed", 2.2))
+			it_data["node"].position.y = float(it_data["base_y"]) + sin(Time.get_ticks_msec() * 0.005) * 0.05
+			if is_instance_valid(player_root) and player_root.position.distance_to(it_data["pos"]) < 1.35:
+				it_data["collected"] = true
+				_on_item_collected(it_data["id"], it_data["name"], it_data["icon"], it_data["node"])
+
+	# 7. Player Movement & Dynamic Camera Follow (X and Z)
+	if is_instance_valid(player_root):
+		if not is_intro_cinematic_active:
+			_handle_player_movement(delta)
+			var target_cam_x := player_root.position.x * 0.75
+			var target_cam_z := player_root.position.z + 4.5
+			main_camera.position.x = lerpf(main_camera.position.x, target_cam_x, delta * 6.0)
+			main_camera.position.z = lerpf(main_camera.position.z, target_cam_z, delta * 6.0)
+
+		# Victory check: level completes ONLY when player collects all required items AND goes OUT through the south door to outside!
+		var all_collected := (collected_items_count >= target_items_total and target_items_total > 0)
+		if all_collected and not is_entering_level:
+			var is_outside_door := (player_root.position.z >= entrance_door_pos.z + 0.85 and absf(player_root.position.x - entrance_door_pos.x) < 2.2) or player_root.position.distance_to(entrance_outside_pos) < 1.8
+			if is_outside_door:
+				_trigger_win()
+
+func _on_item_collected(item_id: String, item_name: String, _icon: String, item_node: Node3D) -> void:
+	collected_items_count += 1
+	if SoundManager != null:
+		SoundManager.play_sfx("collect")
+	if is_instance_valid(item_node):
+		item_node.visible = true
+		item_node.scale = Vector3(0.25, 0.25, 0.25)
+		var tw := create_tween()
+		tw.set_parallel(true)
+		tw.tween_property(item_node, "scale", Vector3.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(item_node, "position:y", item_node.position.y + 0.9, 0.22)
+		tw.chain().tween_interval(0.18)
+		tw.chain().tween_callback(func():
+			if is_instance_valid(item_node):
+				item_node.visible = false
+				item_node.queue_free()
+		)
+
+	_show_powerup_toast("%s COLLECTED! (%d/%d ITEMS FOUND)" % [item_name.to_upper(), collected_items_count, target_items_total], Color("#ffeaa7"))
+	_update_item_collector_hud(item_id)
+	if SignalHub != null:
+		SignalHub.emit_item_collected(item_id, item_name, collected_items_count, target_items_total)
+
+	if collected_items_count >= target_items_total:
+		all_items_collected = true
+		candy_collected = true
+		_update_hud_objective("ALL ITEMS FOUND! GO OUT THE EXIT DOOR!")
+		if is_instance_valid(spawn_marker_label):
+			spawn_marker_label.text = "GO OUT HERE!"
+			spawn_marker_label.modulate = Color("#2ecc71")
+		if is_instance_valid(spawn_marker_border_mat):
+			spawn_marker_border_mat.albedo_color = Color("#2ecc71")
+	else:
+		_update_hud_objective("FIND REMAINING ITEMS! (%d/%d)" % [collected_items_count, target_items_total])
+
+func _on_candy_collected() -> void:
+	if active_containers.size() > 0:
+		var c: Dictionary = active_containers[0]
+		_on_item_collected(c["id"], c["name"], c["icon"], candy_node)
+	else:
+		_on_item_collected("candy_0", "Candy", "🍭", candy_node)
+
+func _update_hud_objective(text: String) -> void:
+	if is_instance_valid(hud_root):
+		var lbl := hud_root.get_node_or_null("ObjectiveLabel") as Label
+		if is_instance_valid(lbl):
+			lbl.text = text
+
+func _trigger_win() -> void:
+	if is_level_cleared or is_spotted:
+		return
+	is_level_cleared = true
+	if SoundManager != null:
+		SoundManager.play_sfx("victory")
+	if SignalHub != null:
+		SignalHub.emit_level_victory(current_level, 20)
+	_update_hud_objective("🎉 LEVEL COMPLETED!")
+	# Make player run OUT the exit door upon completing the level!
+	if is_instance_valid(player_root):
+		player_target_rotation = 0.0
+		if is_instance_valid(player_mesh):
+			player_mesh.rotation.y = 0.0
+		if is_instance_valid(player_anim) and player_anim.has_animation("Run"):
+			player_anim.play("Run")
+		var exit_tw := create_tween()
+		exit_tw.tween_property(player_root, "position", entrance_outside_pos, 0.55).set_trans(Tween.TRANS_SINE)
+	_show_victory_popup()
+
+func _handle_player_movement(delta: float) -> void:
+	var move_dir := Vector3.ZERO
+	if is_entering_level:
+		var entry_diff := player_spawn_pos - player_root.position
+		entry_diff.y = 0.0
+		if entry_diff.length() > 0.35:
+			move_dir = entry_diff.normalized()
+		else:
+			player_root.position = player_spawn_pos
+			is_entering_level = false
+
+	if not is_entering_level:
+		if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+			move_dir.x -= 1.0
+		if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+			move_dir.x += 1.0
+		if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+			move_dir.z -= 1.0
+		if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+			move_dir.z += 1.0
+		# Mobile Virtual Joystick & Touch Drag Movement
+		if touch_move_dir.length_squared() > 0.01:
+			move_dir = touch_move_dir
+		if auto_walk_forward:
+			move_dir.z -= 1.0
+		if auto_walk_loop:
+			var all_collected := (collected_items_count >= target_items_total and target_items_total > 0) or candy_collected
+			if not all_collected:
+				var target_pos := Vector3(0.0, 0.0, -5.0)
+				var seek_key := false
+				if not player_has_key and active_keys.size() > 0:
+					for k in active_keys:
+						if is_instance_valid(k) and not k.is_collected:
+							target_pos = k.position
+							seek_key = true
+							break
+				if not seek_key:
+					for c in active_containers:
+						if not c["is_open"]:
+							target_pos = c["pos"]
+							break
+				var diff := target_pos - player_root.position
+				diff.y = 0.0
+				if diff.length() > 0.2:
+					move_dir = diff.normalized()
+			elif not is_level_cleared:
+				var diff := entrance_outside_pos - player_root.position
+				diff.y = 0.0
+				if diff.length() > 0.2:
+					move_dir = diff.normalized()
+
+	if move_dir.length_squared() > 0.01:
+		move_dir = move_dir.normalized()
+		player_target_rotation = atan2(move_dir.x, move_dir.z)
+
+		var current_speed := PLAYER_SPEED * (1.55 if speed_boost_time > 0.0 else 1.0)
+		var move_step := move_dir * current_speed * delta
+
+		# Move along X with pushable prop interaction
+		var step_x := Vector3(move_step.x, 0.0, 0.0)
+		var next_x := player_root.position + step_x
+		var pushed_x := false
+		for prop in active_props:
+			if is_instance_valid(prop) and next_x.distance_to(prop.position) < (prop.prop_radius + 0.35):
+				if prop.try_push(step_x * 1.15, wall_colliders, active_props):
+					pushed_x = true
+		if not _is_player_colliding_walls(next_x):
+			if not _is_player_colliding_props(next_x) or pushed_x:
+				player_root.position.x = next_x.x
+
+		# Move along Z with pushable prop interaction
+		var step_z := Vector3(0.0, 0.0, move_step.z)
+		var next_z := player_root.position + step_z
+		var pushed_z := false
+		for prop in active_props:
+			if is_instance_valid(prop) and next_z.distance_to(prop.position) < (prop.prop_radius + 0.35):
+				if prop.try_push(step_z * 1.15, wall_colliders, active_props):
+					pushed_z = true
+		if not _is_player_colliding_walls(next_z):
+			if not _is_player_colliding_props(next_z) or pushed_z:
+				player_root.position.z = next_z.z
+
+		# Prevent player from leaving through the south entrance door before collecting all items!
+		var all_done := (collected_items_count >= target_items_total and target_items_total > 0) or candy_collected
+		if not is_entering_level and not all_done:
+			player_root.position.z = minf(player_root.position.z, entrance_door_pos.z - 0.55)
+
+		# Solid cabinet push-out: Prevent player from ever walking inside any item cabinet!
+		for c_entry in active_containers:
+			var cab_aabb: AABB = c_entry.get("collider_aabb", AABB())
+			if cab_aabb.size.length_squared() > 0.01:
+				var exp_cab := cab_aabb.grow(0.26)
+				if exp_cab.has_point(player_root.position):
+					var cc := cab_aabb.get_center()
+					var c_diff := player_root.position - cc
+					var c_half := cab_aabb.size * 0.5 + Vector3(0.26, 0.0, 0.26)
+					var ox := c_half.x - absf(c_diff.x)
+					var oz := c_half.z - absf(c_diff.z)
+					if ox > 0.0 and oz > 0.0:
+						if ox < oz:
+							var s_x := 1.0 if c_diff.x >= 0.0 else -1.0
+							player_root.position.x = cc.x + s_x * (cab_aabb.size.x * 0.5 + 0.28)
+						else:
+							var s_z := 1.0 if c_diff.z >= 0.0 else -1.0
+							player_root.position.z = cc.z + s_z * (cab_aabb.size.z * 0.5 + 0.28)
+
+		# Strict push-out: Repel player if penetrating any wall collider (unless Wall Pass powerup or entering level!)
+		if not is_wall_pass_active and not is_entering_level:
+			for aabb in wall_colliders:
+				var expanded := aabb.grow(0.32)
+				if expanded.has_point(player_root.position):
+					var c := aabb.get_center()
+					var diff := player_root.position - c
+					var half_size := aabb.size * 0.5 + Vector3(0.32, 0.0, 0.32)
+					var overlap_x := half_size.x - absf(diff.x)
+					var overlap_z := half_size.z - absf(diff.z)
+					if overlap_x > 0.0 and overlap_z > 0.0:
+						if overlap_x < overlap_z:
+							player_root.position.x = c.x + signf(diff.x) * (aabb.size.x * 0.5 + 0.35)
+						else:
+							player_root.position.z = c.z + signf(diff.z) * (aabb.size.z * 0.5 + 0.35)
+
+		if is_instance_valid(player_mesh):
+			player_mesh.rotation.y = lerp_angle(player_mesh.rotation.y, player_target_rotation, delta * 14.0)
+		if is_instance_valid(player_anim) and player_anim.has_animation("Run"):
+			if player_anim.current_animation != "Run":
+				player_anim.play("Run")
+
+		# Spawn fading footstep decals
+		footstep_mgr.spawn_footstep_if_needed(level_root, player_root.position, player_target_rotation)
+	else:
+		if is_instance_valid(player_anim) and player_anim.has_animation("Idle"):
+			if player_anim.current_animation != "Idle":
+				player_anim.play("Idle")
+
+func _is_player_colliding_walls(test_pos: Vector3) -> bool:
+	if is_wall_pass_active or is_entering_level:
+		return false
+	for aabb in wall_colliders:
+		if aabb.grow(0.32).has_point(test_pos):
+			return true
+	for door in active_doors:
+		if is_instance_valid(door) and not door.is_open:
+			if door.collider_aabb.grow(0.30).has_point(test_pos):
+				return true
+	return false
+
+func _is_player_colliding_props(test_pos: Vector3) -> bool:
+	for c in active_containers:
+		var cab_aabb: AABB = c.get("collider_aabb", AABB())
+		if cab_aabb.size.length_squared() > 0.01 and cab_aabb.grow(0.26).has_point(test_pos):
+			return true
+	for prop in active_props:
+		if is_instance_valid(prop):
+			if test_pos.distance_to(prop.position) < (prop.prop_radius + 0.28):
+				return true
+	return false
+
+func _is_player_colliding(test_pos: Vector3) -> bool:
+	return _is_player_colliding_walls(test_pos) or _is_player_colliding_props(test_pos)
+
+func _on_button_pressed(target_laser_id: String) -> void:
+	if active_lasers.has(target_laser_id):
+		active_lasers[target_laser_id].deactivate()
+
+func _trigger_fail(reason: String) -> void:
+	if auto_walk_loop:
+		return
+	if is_spotted or is_level_cleared:
+		return
+	is_spotted = true
+	if SoundManager != null:
+		SoundManager.play_sfx("fail")
+	if SignalHub != null:
+		SignalHub.emit_level_failed(current_level, reason)
+	_update_hud_objective("🚨 CAUGHT! SNEAK FAILED")
+	_show_fail_popup(reason)
+
+func _setup_hud() -> void:
+	hud_root = CanvasLayer.new()
+	add_child(hud_root)
+
+	# 1. Bold Cartoon Level Label at Top Center (Consistent, Compact Scale)
+	var lvl_lbl := Label.new()
+	lvl_lbl.name = "LevelLabel"
+	lvl_lbl.text = "LEVEL\n%d" % current_level
+	lvl_lbl.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	lvl_lbl.offset_top = 18.0
+	lvl_lbl.offset_bottom = 85.0
+	lvl_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if game_title_font != null:
+		lvl_lbl.add_theme_font_override("font", game_title_font)
+	lvl_lbl.add_theme_font_size_override("font_size", 32)
+	lvl_lbl.add_theme_color_override("font_color", Color.WHITE)
+	lvl_lbl.add_theme_color_override("font_outline_color", Color("#2c3e50"))
+	lvl_lbl.add_theme_constant_override("outline_size", 9)
+	hud_root.add_child(lvl_lbl)
+
+	# Objective Sub-Label
+	var obj_lbl := Label.new()
+	obj_lbl.name = "ObjectiveLabel"
+	obj_lbl.text = "SNEAK IN & GET THE CANDY!"
+	obj_lbl.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	obj_lbl.offset_top = 82.0
+	obj_lbl.offset_bottom = 110.0
+	obj_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if game_title_font != null:
+		obj_lbl.add_theme_font_override("font", game_title_font)
+	obj_lbl.add_theme_font_size_override("font_size", 15)
+	obj_lbl.add_theme_color_override("font_color", Color("#ffeaa7"))
+	obj_lbl.add_theme_color_override("font_outline_color", Color("#2d3436"))
+	obj_lbl.add_theme_constant_override("outline_size", 5)
+	hud_root.add_child(obj_lbl)
+
+	# 2. Coin Pill Badge at Top Right (Compact & Consistent)
+	coin_panel = PanelContainer.new()
+	coin_panel.name = "CoinPanel"
+	coin_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	coin_panel.offset_left = -175.0
+	coin_panel.offset_top = 22.0
+	coin_panel.offset_right = -25.0
+	coin_panel.offset_bottom = 70.0
+	coin_panel.pivot_offset = Vector2(75.0, 24.0)
+
+	var pill_style := StyleBoxFlat.new()
+	pill_style.bg_color = Color.WHITE
+	pill_style.set_corner_radius_all(24)
+	pill_style.shadow_color = Color(0.0, 0.0, 0.0, 0.18)
+	pill_style.shadow_size = 4
+	coin_panel.add_theme_stylebox_override("panel", pill_style)
+	hud_root.add_child(coin_panel)
+
+	var coin_box := HBoxContainer.new()
+	coin_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	coin_panel.add_child(coin_box)
+
+	var coin_icon := Label.new()
+	coin_icon.text = "🪙"
+	coin_icon.add_theme_font_size_override("font_size", 20)
+	coin_box.add_child(coin_icon)
+
+	coin_lbl = Label.new()
+	coin_lbl.text = " %d" % coins
+	if game_title_font != null:
+		coin_lbl.add_theme_font_override("font", game_title_font)
+	coin_lbl.add_theme_font_size_override("font_size", 20)
+	coin_lbl.add_theme_color_override("font_color", Color("#2d3436"))
+	coin_box.add_child(coin_lbl)
+
+	# 4. Item Collector Widget at Top Left (Compact & Consistent)
+	item_collector_panel = PanelContainer.new()
+	item_collector_panel.name = "ItemCollectorPanel"
+	item_collector_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	item_collector_panel.offset_left = 25.0
+	item_collector_panel.offset_top = 22.0
+	item_collector_panel.offset_right = 210.0
+	item_collector_panel.offset_bottom = 90.0
+
+	var ic_style := StyleBoxFlat.new()
+	ic_style.bg_color = Color(0.12, 0.16, 0.24, 0.92)
+	ic_style.set_corner_radius_all(16)
+	ic_style.border_color = Color("#0984e3")
+	ic_style.set_border_width_all(2)
+	ic_style.shadow_color = Color(0.0, 0.0, 0.0, 0.25)
+	ic_style.shadow_size = 5
+	item_collector_panel.add_theme_stylebox_override("panel", ic_style)
+	hud_root.add_child(item_collector_panel)
+
+	var ic_margin := MarginContainer.new()
+	ic_margin.add_theme_constant_override("margin_left", 10)
+	ic_margin.add_theme_constant_override("margin_top", 6)
+	ic_margin.add_theme_constant_override("margin_right", 10)
+	ic_margin.add_theme_constant_override("margin_bottom", 6)
+	item_collector_panel.add_child(ic_margin)
+
+	var ic_vbox := VBoxContainer.new()
+	ic_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	ic_vbox.add_theme_constant_override("separation", 4)
+	ic_margin.add_child(ic_vbox)
+
+	item_collector_label = Label.new()
+	item_collector_label.text = "🎒 ITEMS TO FIND: 0 / 1"
+	item_collector_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if game_title_font != null:
+		item_collector_label.add_theme_font_override("font", game_title_font)
+	item_collector_label.add_theme_font_size_override("font_size", 13)
+	item_collector_label.add_theme_color_override("font_color", Color("#ffeaa7"))
+	item_collector_label.add_theme_color_override("font_outline_color", Color("#2d3436"))
+	item_collector_label.add_theme_constant_override("outline_size", 4)
+	ic_vbox.add_child(item_collector_label)
+
+	var ic_slots_hbox := HBoxContainer.new()
+	ic_slots_hbox.name = "SlotsHBox"
+	ic_slots_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	ic_slots_hbox.add_theme_constant_override("separation", 8)
+	ic_vbox.add_child(ic_slots_hbox)
+
+	# 3. Bottom Powerup Tray (Consistent, Proportionate Dock)
+	var tray := PanelContainer.new()
+	tray.name = "PowerupTray"
+	tray.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	tray.offset_left = -260.0
+	tray.offset_right = 260.0
+	tray.offset_top = -118.0
+	tray.offset_bottom = -20.0
+
+	var tray_style := StyleBoxFlat.new()
+	tray_style.bg_color = Color(0.04, 0.45, 0.78, 0.90)
+	tray_style.set_corner_radius_all(22)
+	tray_style.border_color = Color("#74b9ff")
+	tray_style.set_border_width_all(3)
+	tray_style.shadow_color = Color(0, 0, 0, 0.25)
+	tray_style.shadow_size = 6
+	tray.add_theme_stylebox_override("panel", tray_style)
+	hud_root.add_child(tray)
+
+	var tray_box := HBoxContainer.new()
+	tray_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	tray_box.add_theme_constant_override("separation", 14)
+	tray.add_child(tray_box)
+
+	speed_badge_lbl = _add_interactive_powerup_item(tray_box, "res://assets/ui/powerup_speed_lightning.svg", "SPEED", "🪙 %d" % POWERUP_COIN_COST, Color("#f39c12"), _activate_speed_powerup, speed_btn_refs)
+	shield_badge_lbl = _add_interactive_powerup_item(tray_box, "res://assets/ui/powerup_invis_white_ball.svg", "INVISIBLE", "🪙 %d" % POWERUP_COIN_COST, Color("#3498db"), _activate_invisibility_powerup, shield_btn_refs)
+	ghost_badge_lbl = _add_interactive_powerup_item(tray_box, "res://assets/ui/powerup_bypass_wall.svg", "BYPASS WALL", "🪙 %d" % POWERUP_COIN_COST, Color("#9b59b6"), _activate_wall_pass_powerup, ghost_btn_refs)
+	_update_powerup_locks()
+
+	# 4. Floating Mobile Virtual Joystick
+	joystick_base = Panel.new()
+	joystick_base.name = "MobileJoystickBase"
+	joystick_base.custom_minimum_size = Vector2(130, 130)
+	joystick_base.size = Vector2(130, 130)
+	joystick_base.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var jb_style := StyleBoxFlat.new()
+	jb_style.bg_color = Color(0.12, 0.16, 0.24, 0.45)
+	jb_style.border_color = Color(1.0, 1.0, 1.0, 0.6)
+	jb_style.set_border_width_all(3)
+	jb_style.set_corner_radius_all(65)
+	joystick_base.add_theme_stylebox_override("panel", jb_style)
+	joystick_base.visible = false
+	hud_root.add_child(joystick_base)
+
+	joystick_knob = Panel.new()
+	joystick_knob.name = "MobileJoystickKnob"
+	joystick_knob.custom_minimum_size = Vector2(58, 58)
+	joystick_knob.size = Vector2(58, 58)
+	joystick_knob.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var jk_style := StyleBoxFlat.new()
+	jk_style.bg_color = Color("#00cec9")
+	jk_style.border_color = Color.WHITE
+	jk_style.set_border_width_all(3)
+	jk_style.set_corner_radius_all(29)
+	jk_style.shadow_color = Color(0, 0, 0, 0.3)
+	jk_style.shadow_size = 6
+	joystick_knob.add_theme_stylebox_override("panel", jk_style)
+	joystick_knob.position = Vector2(36, 36)
+	joystick_base.add_child(joystick_knob)
+
+func _add_interactive_powerup_item(parent: HBoxContainer, svg_path: String, powerup_title: String, badge_text: String, badge_col: Color, on_click: Callable, out_refs: Dictionary = {}) -> Label:
+	var btn := Button.new()
+	btn.custom_minimum_size = Vector2(150, 86)
+	btn.flat = true
+	btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	parent.add_child(btn)
+
+	var icon := TextureRect.new()
+	icon.texture = _load_ui_texture(svg_path)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.set_anchors_preset(Control.PRESET_FULL_RECT)
+	icon.offset_left = 12.0
+	icon.offset_top = 2.0
+	icon.offset_right = -12.0
+	icon.offset_bottom = -24.0
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(icon)
+
+	var lock_overlay := TextureRect.new()
+	lock_overlay.texture = _load_ui_texture("res://assets/ui/powerup_lock_overlay.svg")
+	lock_overlay.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	lock_overlay.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	lock_overlay.custom_minimum_size = Vector2(34, 34)
+	lock_overlay.size = Vector2(34, 34)
+	lock_overlay.position = Vector2(58, 8)
+	lock_overlay.visible = false
+	lock_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(lock_overlay)
+
+	var title_lbl := Label.new()
+	title_lbl.text = powerup_title
+	title_lbl.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	title_lbl.offset_top = -22.0
+	title_lbl.offset_bottom = 0.0
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if game_title_font != null:
+		title_lbl.add_theme_font_override("font", game_title_font)
+	title_lbl.add_theme_font_size_override("font_size", 13)
+	title_lbl.add_theme_color_override("font_color", Color("#ffeaa7"))
+	title_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	title_lbl.add_theme_constant_override("outline_size", 3)
+	title_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(title_lbl)
+
+	var badge := Panel.new()
+	badge.custom_minimum_size = Vector2(48, 18)
+	badge.size = Vector2(48, 18)
+	badge.position = Vector2(96, 4)
+	var b_style := StyleBoxFlat.new()
+	b_style.bg_color = badge_col
+	b_style.set_corner_radius_all(9)
+	b_style.border_color = Color.WHITE
+	b_style.set_border_width_all(1)
+	badge.add_theme_stylebox_override("panel", b_style)
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(badge)
+
+	var b_lbl := Label.new()
+	b_lbl.text = badge_text
+	b_lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
+	b_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	b_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	if game_title_font != null:
+		b_lbl.add_theme_font_override("font", game_title_font)
+	b_lbl.add_theme_font_size_override("font_size", 11)
+	b_lbl.add_theme_color_override("font_color", Color.WHITE)
+	b_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	b_lbl.add_theme_constant_override("outline_size", 2)
+	b_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.add_child(b_lbl)
+
+	out_refs["icon"] = icon
+	out_refs["lock"] = lock_overlay
+	out_refs["title"] = title_lbl
+	out_refs["badge_style"] = b_style
+	out_refs["badge_lbl"] = b_lbl
+	out_refs["unlocked_col"] = badge_col
+
+	btn.pressed.connect(on_click)
+	return b_lbl
+
+func _apply_powerup_lock_visual(refs: Dictionary, is_locked: bool, unlock_lvl: int) -> void:
+	if refs.is_empty():
+		return
+	var icon_rect: TextureRect = refs.get("icon")
+	var lock_rect: TextureRect = refs.get("lock")
+	var title_lbl: Label = refs.get("title")
+	var b_style: StyleBoxFlat = refs.get("badge_style")
+	var b_lbl: Label = refs.get("badge_lbl")
+	var unlocked_col: Color = refs.get("unlocked_col", Color("#f39c12"))
+	if is_instance_valid(icon_rect):
+		icon_rect.modulate = Color(0.38, 0.42, 0.48, 0.68) if is_locked else Color.WHITE
+	if is_instance_valid(lock_rect):
+		lock_rect.visible = is_locked
+	if is_instance_valid(title_lbl):
+		title_lbl.add_theme_color_override("font_color", Color("#b2bec3") if is_locked else Color("#ffeaa7"))
+	if b_style != null:
+		b_style.bg_color = Color("#636e72") if is_locked else unlocked_col
+	if is_instance_valid(b_lbl):
+		b_lbl.text = ("🔒 LV %d" % unlock_lvl) if is_locked else ("🪙 %d" % POWERUP_COIN_COST)
+
+func _update_powerup_locks() -> void:
+	var speed_locked := not GameManager.is_powerup_unlocked("speed", current_level) if GameManager != null else (current_level < SPEED_UNLOCK_LEVEL)
+	var invis_locked := not GameManager.is_powerup_unlocked("invisible", current_level) if GameManager != null else (current_level < INVIS_UNLOCK_LEVEL)
+	var wall_locked := not GameManager.is_powerup_unlocked("bypass_wall", current_level) if GameManager != null else (current_level < BYPASS_WALL_UNLOCK_LEVEL)
+	_apply_powerup_lock_visual(speed_btn_refs, speed_locked, SPEED_UNLOCK_LEVEL)
+	_apply_powerup_lock_visual(shield_btn_refs, invis_locked, INVIS_UNLOCK_LEVEL)
+	_apply_powerup_lock_visual(ghost_btn_refs, wall_locked, BYPASS_WALL_UNLOCK_LEVEL)
+
+func _populate_item_collector_hud() -> void:
+	if not is_instance_valid(hud_root) or not is_instance_valid(item_collector_panel):
+		return
+	var slots_hbox := item_collector_panel.find_child("SlotsHBox", true, false) as HBoxContainer
+	if not slots_hbox:
+		return
+	for child in slots_hbox.get_children():
+		child.queue_free()
+	item_slot_panels.clear()
+	item_slot_badges.clear()
+
+	target_items_total = target_items.size()
+	collected_items_count = 0
+	all_items_collected = false
+	if is_instance_valid(item_collector_label):
+		item_collector_label.text = "🎒 ITEMS TO FIND: 0 / %d" % target_items_total
+		item_collector_label.add_theme_color_override("font_color", Color("#ffeaa7"))
+
+	if is_instance_valid(hud_root):
+		var obj_lbl := hud_root.get_node_or_null("ObjectiveLabel") as Label
+		if is_instance_valid(obj_lbl):
+			if target_items_total == 1:
+				obj_lbl.text = "SNEAK IN & GET THE %s!" % String(target_items[0].get("name", "ITEM")).to_upper()
+			else:
+				obj_lbl.text = "FIND ALL %d HIDDEN ITEMS & ESCAPE!" % target_items_total
+
+	for i in range(target_items.size()):
+		var it: Dictionary = target_items[i]
+		var slot := Panel.new()
+		slot.name = "Slot_%s" % it["id"]
+		slot.custom_minimum_size = Vector2(36, 36)
+
+		var s_style := StyleBoxFlat.new()
+		s_style.bg_color = Color("#2d3436")
+		s_style.set_corner_radius_all(10)
+		s_style.border_color = Color("#636e72")
+		s_style.set_border_width_all(2)
+		slot.add_theme_stylebox_override("panel", s_style)
+		slots_hbox.add_child(slot)
+		item_slot_panels.append(slot)
+
+		var icon_lbl := Label.new()
+		icon_lbl.text = it.get("icon", "🎁")
+		icon_lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
+		icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		icon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		icon_lbl.add_theme_font_size_override("font_size", 18)
+		slot.add_child(icon_lbl)
+
+		# Checkmark Badge in top-right of slot
+		var check_badge := Label.new()
+		check_badge.text = "✓"
+		check_badge.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+		check_badge.offset_left = -16.0
+		check_badge.offset_top = 2.0
+		check_badge.offset_right = -2.0
+		check_badge.offset_bottom = 18.0
+		check_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		check_badge.add_theme_font_size_override("font_size", 14)
+		check_badge.add_theme_color_override("font_color", Color("#2ecc71"))
+		check_badge.add_theme_color_override("font_outline_color", Color.BLACK)
+		check_badge.add_theme_constant_override("outline_size", 4)
+		check_badge.visible = false
+		slot.add_child(check_badge)
+		item_slot_badges.append(check_badge)
+
+func _update_item_collector_hud(collected_id: String) -> void:
+	if is_instance_valid(item_collector_label):
+		if collected_items_count >= target_items_total:
+			item_collector_label.text = "🎒 ALL ITEMS FOUND! (%d/%d) ✓" % [collected_items_count, target_items_total]
+			item_collector_label.add_theme_color_override("font_color", Color("#2ecc71"))
+		else:
+			item_collector_label.text = "🎒 ITEMS TO FIND: %d / %d" % [collected_items_count, target_items_total]
+
+	for i in range(target_items.size()):
+		var it: Dictionary = target_items[i]
+		if it["id"] == collected_id:
+			if i < item_slot_panels.size():
+				var slot: Panel = item_slot_panels[i]
+				var s_style := StyleBoxFlat.new()
+				s_style.bg_color = Color("#27ae60")
+				s_style.set_corner_radius_all(12)
+				s_style.border_color = Color("#f1c40f")
+				s_style.set_border_width_all(3)
+				slot.add_theme_stylebox_override("panel", s_style)
+
+				# Bouncy punch tween
+				var tw := create_tween()
+				tw.tween_property(slot, "scale", Vector2(1.28, 1.28), 0.15).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				tw.tween_property(slot, "scale", Vector2.ONE, 0.15)
+			if i < item_slot_badges.size():
+				item_slot_badges[i].visible = true
+
+func _input(event: InputEvent) -> void:
+	if is_spotted or is_level_cleared:
+		if is_touch_active:
+			_reset_mobile_touch()
+		return
+
+	# Mobile Screen Touch & Drag / Mouse Drag for Virtual Joystick
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			var tray_ctrl = hud_root.get_node_or_null("PowerupTray") as Control
+			if is_instance_valid(tray_ctrl) and tray_ctrl.get_global_rect().has_point(event.position):
+				return
+			if is_instance_valid(victory_popup) or is_instance_valid(fail_popup):
+				return
+			_start_mobile_touch(event.position)
+		else:
+			_reset_mobile_touch()
+	elif event is InputEventScreenDrag:
+		if is_touch_active:
+			_update_mobile_drag(event.position)
+	elif event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				var tray_ctrl = hud_root.get_node_or_null("PowerupTray") as Control
+				if is_instance_valid(tray_ctrl) and tray_ctrl.get_global_rect().has_point(event.position):
+					return
+				if is_instance_valid(victory_popup) or is_instance_valid(fail_popup):
+					return
+				_start_mobile_touch(event.position)
+			else:
+				_reset_mobile_touch()
+	elif event is InputEventMouseMotion:
+		if is_touch_active:
+			_update_mobile_drag(event.position)
+
+	# Hotkeys for desktop testing (1=Speed, 2=Invisibility, 3=Pass Wall Without Door)
+	if event is InputEventKey and event.is_pressed() and not event.is_echo():
+		if event.keycode == KEY_1 or event.keycode == KEY_Q:
+			_activate_speed_powerup()
+		elif event.keycode == KEY_2 or event.keycode == KEY_SPACE:
+			_activate_invisibility_powerup()
+		elif event.keycode == KEY_3 or event.keycode == KEY_E:
+			_activate_wall_pass_powerup()
+
+func _start_mobile_touch(screen_pos: Vector2) -> void:
+	is_touch_active = true
+	touch_start_pos = screen_pos
+	touch_move_dir = Vector3.ZERO
+	if is_instance_valid(joystick_base):
+		joystick_base.position = screen_pos - Vector2(65, 65)
+		joystick_base.visible = true
+	if is_instance_valid(joystick_knob):
+		joystick_knob.position = Vector2(36, 36)
+
+func _update_mobile_drag(screen_pos: Vector2) -> void:
+	if not is_touch_active:
+		return
+	var diff := screen_pos - touch_start_pos
+	var dist := diff.length()
+	var max_radius: float = 48.0
+	var knob_offset := diff
+	if dist > max_radius:
+		knob_offset = diff.normalized() * max_radius
+	if is_instance_valid(joystick_knob):
+		joystick_knob.position = Vector2(36, 36) + knob_offset
+
+	# Responsive deadzone
+	if dist > 8.0:
+		var norm := diff.normalized()
+		# Touch Screen X -> 3D World X, Touch Screen Y -> 3D World Z
+		touch_move_dir = Vector3(norm.x, 0.0, norm.y)
+	else:
+		touch_move_dir = Vector3.ZERO
+
+func _reset_mobile_touch() -> void:
+	is_touch_active = false
+	touch_move_dir = Vector3.ZERO
+	if is_instance_valid(joystick_base):
+		joystick_base.visible = false
+	if is_instance_valid(joystick_knob):
+		joystick_knob.position = Vector2(36, 36)
+
+func _on_coins_changed(total: int) -> void:
+	coins = total
+	if is_instance_valid(coin_lbl):
+		coin_lbl.text = " %d" % coins
+
+func _try_spend_powerup_coins() -> bool:
+	if GameManager != null:
+		if not GameManager.try_spend_coins(POWERUP_COIN_COST):
+			if SoundManager != null:
+				SoundManager.play_sfx("wrong")
+			_show_powerup_toast("NEED %d COINS FOR POWERUP!" % POWERUP_COIN_COST, Color("#e74c3c"))
+			return false
+		coins = GameManager.coins
+	else:
+		if coins < POWERUP_COIN_COST:
+			if SoundManager != null:
+				SoundManager.play_sfx("wrong")
+			_show_powerup_toast("NEED %d COINS FOR POWERUP!" % POWERUP_COIN_COST, Color("#e74c3c"))
+			return false
+		coins -= POWERUP_COIN_COST
+
+	if is_instance_valid(coin_lbl):
+		coin_lbl.text = " %d" % coins
+	if is_instance_valid(coin_panel):
+		var p_tw := create_tween()
+		p_tw.tween_property(coin_panel, "scale", Vector2(1.15, 1.15), 0.08)
+		p_tw.tween_property(coin_panel, "scale", Vector2.ONE, 0.1)
+	return true
+
+func _activate_speed_powerup() -> void:
+	if speed_boost_time > 0.0 or is_level_cleared or is_spotted:
+		return
+	if not _try_spend_powerup_coins():
+		return
+	speed_boost_time = 5.0
+	if SoundManager != null:
+		SoundManager.play_sfx("powerup_speed")
+	if SignalHub != null:
+		SignalHub.emit_powerup_activated("speed", 5.0)
+	_show_powerup_toast("SPEED BOOST ACTIVE! (-%d COINS)" % POWERUP_COIN_COST, Color("#f1c40f"))
+	if is_instance_valid(player_ring):
+		var tw := create_tween()
+		tw.tween_property(player_ring, "scale", Vector3(1.35, 1.35, 1.35), 0.2)
+		tw.tween_property(player_ring, "scale", Vector3.ONE, 0.2)
+
+func _activate_invisibility_powerup() -> void:
+	if is_level_cleared or is_spotted:
+		return
+	var is_unlocked := GameManager.is_powerup_unlocked("invisible", current_level) if GameManager != null else (current_level >= INVIS_UNLOCK_LEVEL)
+	if not is_unlocked:
+		if SoundManager != null:
+			SoundManager.play_sfx("locked")
+		_show_powerup_toast("LOCKED! INVISIBLE UNLOCKS AT LEVEL %d!" % INVIS_UNLOCK_LEVEL, Color("#e74c3c"))
+		return
+	if invisibility_time > 0.0:
+		return
+	if not _try_spend_powerup_coins():
+		return
+	invisibility_time = 5.0
+	is_player_invisible = true
+	if SoundManager != null:
+		SoundManager.play_sfx("powerup_invisible")
+	if SignalHub != null:
+		SignalHub.emit_powerup_activated("invisible", 5.0)
+	_set_player_transparency(0.35, Color("#ffffff"))
+	_show_powerup_toast("INVISIBLE! GUARDS CANNOT SEE YOU! (-%d COINS)" % POWERUP_COIN_COST, Color("#00cec9"))
+
+func _activate_wall_pass_powerup() -> void:
+	if is_level_cleared or is_spotted:
+		return
+	var is_unlocked := GameManager.is_powerup_unlocked("bypass_wall", current_level) if GameManager != null else (current_level >= BYPASS_WALL_UNLOCK_LEVEL)
+	if not is_unlocked:
+		if SoundManager != null:
+			SoundManager.play_sfx("locked")
+		_show_powerup_toast("LOCKED! BYPASS WALL UNLOCKS AT LEVEL %d!" % BYPASS_WALL_UNLOCK_LEVEL, Color("#e74c3c"))
+		return
+	if wall_pass_time > 0.0:
+		return
+	if not _try_spend_powerup_coins():
+		return
+	wall_pass_time = 5.0
+	is_wall_pass_active = true
+	if SoundManager != null:
+		SoundManager.play_sfx("powerup_wall")
+	if SignalHub != null:
+		SignalHub.emit_powerup_activated("bypass_wall", 5.0)
+	_set_player_transparency(0.45, Color("#9b59b6"))
+	_show_powerup_toast("BYPASS WALL ACTIVE! WALK THROUGH WALLS! (-%d COINS)" % POWERUP_COIN_COST, Color("#9b59b6"))
+
+func _set_player_transparency(alpha: float, rim_col: Color = Color.TRANSPARENT) -> void:
+	if not is_instance_valid(player_mesh):
+		return
+	for found in player_mesh.find_children("*", "MeshInstance3D", true, false):
+		var mesh_instance := found as MeshInstance3D
+		if mesh_instance.mesh == null:
+			continue
+		for surface in mesh_instance.mesh.get_surface_count():
+			var mat := mesh_instance.get_surface_override_material(surface) as StandardMaterial3D
+			if mat != null:
+				if alpha < 0.99:
+					mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+					mat.albedo_color.a = alpha
+					mat.emission_enabled = true
+					mat.emission = rim_col
+					mat.emission_energy_multiplier = 0.9
+				else:
+					mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+					mat.albedo_color.a = 1.0
+					mat.emission_enabled = false
+	if is_instance_valid(player_ring):
+		var r_mat := player_ring.material_override as StandardMaterial3D
+		if r_mat:
+			if alpha < 0.99:
+				r_mat.albedo_color = Color(0.0, 0.9, 1.0, 0.4)
+				r_mat.emission = Color(0.0, 0.9, 1.0)
+			else:
+				r_mat.albedo_color = Color("#00cec9")
+				r_mat.emission = Color("#00cec9")
+
+func _show_powerup_toast(text: String, col: Color) -> void:
+	if not is_instance_valid(hud_root):
+		return
+	var toast := PanelContainer.new()
+	var t_style := StyleBoxFlat.new()
+	t_style.bg_color = Color(0.1, 0.15, 0.22, 0.92)
+	t_style.border_color = col
+	t_style.set_border_width_all(3)
+	t_style.set_corner_radius_all(18)
+	toast.add_theme_stylebox_override("panel", t_style)
+	toast.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	toast.offset_left = 40.0
+	toast.offset_right = -40.0
+	toast.offset_top = 185.0
+	toast.offset_bottom = 230.0
+
+	var t_lbl := Label.new()
+	t_lbl.text = text
+	t_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	if game_title_font != null:
+		t_lbl.add_theme_font_override("font", game_title_font)
+	t_lbl.add_theme_font_size_override("font_size", 18)
+	t_lbl.add_theme_color_override("font_color", col)
+	t_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	t_lbl.add_theme_constant_override("outline_size", 6)
+	toast.add_child(t_lbl)
+	hud_root.add_child(toast)
+
+	var tw := create_tween()
+	toast.modulate.a = 0.0
+	tw.tween_property(toast, "modulate:a", 1.0, 0.2)
+	tw.tween_interval(1.8)
+	tw.tween_property(toast, "modulate:a", 0.0, 0.4)
+	tw.tween_callback(toast.queue_free)
+
+func _update_powerups(delta: float) -> void:
+	var cost_txt := "%d" % POWERUP_COIN_COST
+	var invis_idle_txt := ("LVL %d" % INVIS_UNLOCK_LEVEL) if current_level < INVIS_UNLOCK_LEVEL else cost_txt
+	var wall_idle_txt := ("LVL %d" % BYPASS_WALL_UNLOCK_LEVEL) if current_level < BYPASS_WALL_UNLOCK_LEVEL else cost_txt
+
+	if speed_boost_time > 0.0:
+		speed_boost_time = maxf(0.0, speed_boost_time - delta)
+		if is_instance_valid(speed_badge_lbl):
+			speed_badge_lbl.text = "%.1fs" % speed_boost_time
+		if speed_boost_time == 0.0:
+			if is_instance_valid(speed_badge_lbl):
+				speed_badge_lbl.text = cost_txt
+	elif is_instance_valid(speed_badge_lbl) and speed_badge_lbl.text != cost_txt:
+		speed_badge_lbl.text = cost_txt
+
+	if invisibility_time > 0.0:
+		invisibility_time = maxf(0.0, invisibility_time - delta)
+		if is_instance_valid(shield_badge_lbl):
+			shield_badge_lbl.text = "%.1fs" % invisibility_time
+		if invisibility_time == 0.0:
+			is_player_invisible = false
+			if not is_wall_pass_active:
+				_set_player_transparency(1.0)
+			if is_instance_valid(shield_badge_lbl):
+				shield_badge_lbl.text = invis_idle_txt
+			_show_powerup_toast("VISIBLE AGAIN!", Color("#e74c3c"))
+	elif is_instance_valid(shield_badge_lbl) and shield_badge_lbl.text != invis_idle_txt:
+		shield_badge_lbl.text = invis_idle_txt
+
+	if wall_pass_time > 0.0:
+		wall_pass_time = maxf(0.0, wall_pass_time - delta)
+		if is_instance_valid(ghost_badge_lbl):
+			ghost_badge_lbl.text = "%.1fs" % wall_pass_time
+		if wall_pass_time == 0.0:
+			is_wall_pass_active = false
+			if is_instance_valid(player_root):
+				player_root.position = _find_nearest_safe_floor(player_root.position, 0.35)
+			if not is_player_invisible:
+				_set_player_transparency(1.0)
+			if is_instance_valid(ghost_badge_lbl):
+				ghost_badge_lbl.text = wall_idle_txt
+			_show_powerup_toast("BYPASS WALL ENDED!", Color("#9b59b6"))
+	elif is_instance_valid(ghost_badge_lbl) and ghost_badge_lbl.text != wall_idle_txt:
+		ghost_badge_lbl.text = wall_idle_txt
+
+func _show_victory_popup() -> void:
+	if is_instance_valid(victory_popup) or not is_instance_valid(hud_root):
+		return
+
+	var scene := load("res://scenes/popups/victory_popup.tscn") as PackedScene
+	if scene != null:
+		victory_popup = scene.instantiate()
+		victory_popup.setup(current_level, 20, "res://assets/ui/boy_candy_splash_bg.png")
+		victory_popup.continue_pressed.connect(_on_continue_pressed)
+		victory_popup.reward_coins_ready.connect(func(from_pos: Vector2, amount: int):
+			var to_pos := coin_panel.get_global_rect().get_center() if is_instance_valid(coin_panel) else Vector2(430.0, 70.0)
+			_animate_flying_coins(from_pos, to_pos, amount)
+		)
+		hud_root.add_child(victory_popup)
+
+func _animate_flying_coins(from_pos: Vector2, to_pos: Vector2, total_amount: int) -> void:
+	var coin_count: int = 10
+	var per_coin: int = total_amount / coin_count
+
+	for i in range(coin_count):
+		var delay := i * 0.08
+		get_tree().create_timer(delay).timeout.connect(func():
+			if not is_instance_valid(hud_root):
+				return
+			var coin_item := PanelContainer.new()
+			coin_item.custom_minimum_size = Vector2(34, 34)
+			var c_style := StyleBoxFlat.new()
+			c_style.bg_color = Color("#f1c40f")
+			c_style.border_color = Color("#d35400")
+			c_style.set_border_width_all(2)
+			c_style.set_corner_radius_all(17)
+			coin_item.add_theme_stylebox_override("panel", c_style)
+			coin_item.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+			var c_lbl := Label.new()
+			c_lbl.text = "🪙"
+			c_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			c_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			c_lbl.add_theme_font_size_override("font_size", 20)
+			coin_item.add_child(c_lbl)
+
+			var start_p := from_pos + Vector2(randf_range(-25, 25), randf_range(-12, 12))
+			coin_item.position = start_p - Vector2(17, 17)
+			coin_item.pivot_offset = Vector2(17, 17)
+			hud_root.add_child(coin_item)
+
+			# Curved trajectory arc staying cleanly inside screen view
+			var mid_x := lerpf(start_p.x, to_pos.x, randf_range(0.35, 0.65)) + randf_range(-40, 40)
+			var mid_y := clampf(minf(start_p.y, to_pos.y) - randf_range(30, 80), 45.0, 450.0)
+			var mid_p := Vector2(mid_x, mid_y)
+
+			var tw := create_tween()
+			tw.tween_property(coin_item, "scale", Vector2(1.3, 1.3), 0.1).set_trans(Tween.TRANS_QUAD)
+			tw.tween_property(coin_item, "position", mid_p - Vector2(17, 17), 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			tw.tween_property(coin_item, "position", to_pos - Vector2(17, 17), 0.32).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+			tw.parallel().tween_property(coin_item, "scale", Vector2(0.85, 0.85), 0.32)
+
+			tw.tween_callback(func():
+				if GameManager != null:
+					GameManager.add_coins(per_coin)
+				else:
+					coins += per_coin
+				if SoundManager != null:
+					SoundManager.play_sfx("coin")
+				if is_instance_valid(coin_lbl):
+					coin_lbl.text = " %d" % coins
+				if is_instance_valid(coin_panel):
+					var p_tw := create_tween()
+					p_tw.tween_property(coin_panel, "scale", Vector2(1.18, 1.18), 0.06)
+					p_tw.tween_property(coin_panel, "scale", Vector2.ONE, 0.1)
+				coin_item.queue_free()
+			)
+		)
+
+func _on_continue_pressed() -> void:
+	if SoundManager != null:
+		SoundManager.play_sfx("button")
+	if is_instance_valid(victory_popup):
+		victory_popup.queue_free()
+		victory_popup = null
+
+	# Show Interstitial Ad (every 2 completed levels)
+	var ad_mgr = get_tree().root.get_node_or_null("AdManager")
+	if ad_mgr != null and ad_mgr.has_method("on_level_finished_check_interstitial"):
+		ad_mgr.on_level_finished_check_interstitial()
+
+	current_level += 1
+	# Unlimited levels progression: loads static JSONs (1..5) then seamlessly shifts into procedural generation (6, 7, 8... 100+)
+	load_level(current_level)
+
+func _show_fail_popup(reason: String) -> void:
+	if is_instance_valid(fail_popup) or not is_instance_valid(hud_root):
+		return
+
+	var scene := load("res://scenes/popups/fail_popup.tscn") as PackedScene
+	if scene != null:
+		fail_popup = scene.instantiate()
+		fail_popup.setup(reason if not reason.is_empty() else "YOU WERE SPOTTED BY THE GUARD!", "💡 TIP: Sneak when guards turn away or use Invisibility!", "res://assets/ui/boy_crying_fail.png")
+		fail_popup.retry_pressed.connect(_on_retry_pressed)
+		hud_root.add_child(fail_popup)
+
+func _on_retry_pressed() -> void:
+	if SoundManager != null:
+		SoundManager.play_sfx("button")
+	if is_instance_valid(fail_popup):
+		fail_popup.queue_free()
+		fail_popup = null
+	is_spotted = false
+	is_level_cleared = false
+	candy_collected = false
+	load_level(current_level)
+
+func _update_hud() -> void:
+	var lbl: Label = hud_root.get_node_or_null("LevelLabel")
+	if lbl:
+		lbl.text = "LEVEL\n%d" % current_level
+	_update_powerup_locks()
+
+func _load_ui_texture(res_path: String) -> Texture2D:
+	var global_path := ProjectSettings.globalize_path(res_path)
+	if FileAccess.file_exists(global_path):
+		var img := Image.load_from_file(global_path)
+		if img and not img.is_empty():
+			return ImageTexture.create_from_image(img)
+	if ResourceLoader.exists(res_path):
+		return load(res_path) as Texture2D
+	return null

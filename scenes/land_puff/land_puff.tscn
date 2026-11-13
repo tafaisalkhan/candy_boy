@@ -1,0 +1,51 @@
+[gd_scene format=3 uid="uid://dpbtl87iburi7"]
+
+[ext_resource type="Texture2D" path="res://assets/particles/smoke_07.svg" id="1_f4d8k"]
+
+[sub_resource type="Gradient" id="Gradient_f4d8k"]
+colors = PackedColorArray(0.7137255, 0.40392157, 0, 1, 0.5529412, 0.627451, 0.5019608, 1)
+
+[sub_resource type="GradientTexture1D" id="GradientTexture1D_67ihe"]
+gradient = SubResource("Gradient_f4d8k")
+
+[sub_resource type="Curve" id="Curve_67ihe"]
+_data = [Vector2(0, 0), 0.0, 0.0, 0, 0, Vector2(0.32244897, 1), 0.0, 0.0, 0, 0, Vector2(1, 0), 0.0, 0.0, 0, 0]
+point_count = 3
+
+[sub_resource type="CurveTexture" id="CurveTexture_mpatl"]
+curve = SubResource("Curve_67ihe")
+
+[sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_67ihe"]
+direction = Vector3(0, 0, 1)
+initial_velocity_min = 0.5
+initial_velocity_max = 0.7
+gravity = Vector3(0, 0, 0)
+damping_min = 1.0
+damping_max = 1.0
+scale_min = 0.29999998
+scale_max = 0.59999996
+scale_curve = SubResource("CurveTexture_mpatl")
+color_initial_ramp = SubResource("GradientTexture1D_67ihe")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_f4d8k"]
+transparency = 1
+shading_mode = 0
+vertex_color_use_as_albedo = true
+albedo_texture = ExtResource("1_f4d8k")
+billboard_mode = 3
+billboard_keep_scale = true
+particles_anim_h_frames = 1
+particles_anim_v_frames = 1
+particles_anim_loop = false
+
+[sub_resource type="QuadMesh" id="QuadMesh_irwop"]
+material = SubResource("StandardMaterial3D_f4d8k")
+size = Vector2(0.5, 0.5)
+
+[node name="LandPuff" type="GPUParticles3D" unique_id=629546301]
+emitting = false
+amount = 12
+lifetime = 0.5
+one_shot = true
+process_material = SubResource("ParticleProcessMaterial_67ihe")
+draw_pass_1 = SubResource("QuadMesh_irwop")

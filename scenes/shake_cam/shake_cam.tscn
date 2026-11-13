@@ -1,0 +1,7 @@
+[gd_scene format=3 uid="uid://dv3vxp0at033t"]
+
+[ext_resource type="Script" uid="uid://l4nuylbidpw" path="res://scenes/shake_cam/shake_cam.gd" id="1_tfo78"]
+
+[node name="ShakeCam" type="Camera3D" unique_id=1346544782]
+transform = Transform3D(1.0000001, 0, 0, 0, 1.0000001, 0, 0, 0, 1, 0, 0, 0)
+script = ExtResource("1_tfo78")

@@ -1,0 +1,15 @@
+[gd_scene format=3 uid="uid://28ksu42gp5gt"]
+
+[ext_resource type="Script" uid="uid://by426swdx6qw6" path="res://scenes/fell_off/fell_off.gd" id="1_dfw4j"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_1cbbd"]
+
+[node name="FellOff" type="Area3D" unique_id=674359236]
+collision_layer = 0
+collision_mask = 128
+script = ExtResource("1_dfw4j")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=897420438]
+shape = SubResource("BoxShape3D_1cbbd")
+
+[connection signal="area_entered" from="." to="." method="_on_area_entered"]

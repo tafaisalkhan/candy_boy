@@ -1,0 +1,10 @@
+[gd_scene format=3 uid="uid://cub3pp0n81hua"]
+
+[ext_resource type="Script" uid="uid://eq6n6ht70lb7" path="res://scenes/shooter/shooter.gd" id="1_gmxs7"]
+[ext_resource type="AudioStream" uid="uid://bt14k7q7pcrja" path="res://assets/sounds/granny/player_shoot.wav" id="2_5fpcm"]
+
+[node name="Shooter" type="Node3D" unique_id=967006205]
+script = ExtResource("1_gmxs7")
+
+[node name="ShootSound" type="AudioStreamPlayer3D" parent="." unique_id=1643015074]
+stream = ExtResource("2_5fpcm")

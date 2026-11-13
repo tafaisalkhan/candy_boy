@@ -1,0 +1,22 @@
+[gd_scene format=3 uid="uid://d0jkvg3ugj54u"]
+
+[ext_resource type="Script" uid="uid://dsxkmdgtd7jxm" path="res://scenes/projectile/projectile.gd" id="1_lw0th"]
+[ext_resource type="PackedScene" uid="uid://dxmplnec6xovp" path="res://scenes/explosion_effect/explosion_effect.tscn" id="2_tncby"]
+[ext_resource type="PackedScene" uid="uid://c2q7r8jibsjci" path="res://scenes/life_timer/life_timer.tscn" id="4_tldn6"]
+[ext_resource type="PackedScene" uid="uid://bs8j7gmhqm8tb" path="res://scenes/hit_box/hit_box.tscn" id="5_fnbuj"]
+
+[node name="Projectile" type="Node3D" unique_id=737381313]
+script = ExtResource("1_lw0th")
+gravity = -10.0
+speed = 20.0
+explosion_scene = ExtResource("2_tncby")
+
+[node name="FlightSound" type="AudioStreamPlayer3D" parent="." unique_id=686855182]
+autoplay = true
+
+[node name="LifeTimer" parent="." unique_id=1282175697 instance=ExtResource("4_tldn6")]
+
+[node name="HitBox" parent="." unique_id=931378236 instance=ExtResource("5_fnbuj")]
+transform = Transform3D(1, 0, 0, 0, -4.371139e-08, -1, 0, 1, -4.371139e-08, 0, 0, 0)
+
+[connection signal="hit" from="HitBox" to="." method="_on_hit_box_hit"]

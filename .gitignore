@@ -1,0 +1,43 @@
+# Godot 4 Engine caches
+.godot/
+*.tmp
+*.import
+
+# User Request Exclusions
+# 1. No Assets
+assets/
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.wav
+*.mp3
+*.ogg
+*.fbx
+*.obj
+*.gltf
+*.glb
+*.ttf
+*.otf
+
+# 2. No Keys
+*.keystore
+*.jks
+*.key
+*.p12
+*.pem
+
+# 3. No JSON files
+*.json
+
+# Temporary flags & screenshots
+*.flag
+screenshot_*
+*.log
+
+# Internal State & Notes
+STATE.md
+
+# Large binary downloads in addons
+addons/**/downloads/
+*.zip
