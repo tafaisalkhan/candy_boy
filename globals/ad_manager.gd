@@ -31,6 +31,10 @@ var is_ads_removed: bool = false
 
 # Cached Ad Objects
 var _banner_view = null
+var _banner_view_right = null
+var _banner_view_left = null
+var _banner_cb_right = null
+var _banner_cb_left = null
 var _interstitial_ad = null
 var _rewarded_ad = null
 var _is_banner_requested: bool = false
@@ -113,34 +117,41 @@ func _resume_game_from_ad() -> void:
 # ==============================================================================
 
 func _load_banner() -> void:
-	if not _plugin_available or not is_initialized or is_ads_removed or _banner_view != null:
+	if not _plugin_available or not is_initialized or is_ads_removed:
 		return
 
-	print("[AdManager] Loading banner ad unit: %s" % BANNER_AD_ID)
-	# Position banner on the side (RIGHT) so it never covers power-ups at the bottom or objectives at the top!
-	_banner_view = AdView.new(BANNER_AD_ID, AdSize.BANNER, AdPosition.RIGHT)
-	_banner_cb = AdListener.new()
-	_banner_cb.on_ad_loaded = func():
-		print("[AdManager] Banner ad loaded successfully!")
-		banner_loaded.emit()
-		if _is_banner_requested and _banner_view != null and _banner_view.has_method("show"):
-			_banner_view.show()
+	# 1. Right Side Banner Ad
+	if _banner_view_right == null:
+		print("[AdManager] Loading RIGHT banner ad: %s" % BANNER_AD_ID)
+		_banner_view_right = AdView.new(BANNER_AD_ID, AdSize.BANNER, AdPosition.RIGHT)
+		_banner_cb_right = AdListener.new()
+		_banner_cb_right.on_ad_loaded = func():
+			print("[AdManager] RIGHT Banner ad loaded successfully!")
+			banner_loaded.emit()
+			if _is_banner_requested and _banner_view_right != null and _banner_view_right.has_method("show"):
+				_banner_view_right.show()
+		_banner_cb_right.on_ad_failed_to_load = func(err):
+			var err_str: String = str(err.message if "message" in err else err)
+			print("[AdManager] RIGHT Banner ad failed to load: ", err_str)
+			banner_failed.emit(err_str)
+		_banner_view_right.ad_listener = _banner_cb_right
+		_banner_view_right.load_ad(AdRequest.new())
+		_banner_view = _banner_view_right
 
-	_banner_cb.on_ad_failed_to_load = func(err):
-		var err_str: String = str(err.message if "message" in err else err)
-		print("[AdManager] Banner ad failed to load: ", err_str)
-		banner_failed.emit(err_str)
-		# Retry loading after 25 seconds
-		if not is_ads_removed and is_instance_valid(instance):
-			var tw := instance.create_tween()
-			tw.tween_interval(25.0)
-			tw.tween_callback(func():
-				if _banner_view == null and not is_ads_removed and _is_banner_requested:
-					_load_banner()
-			)
-
-	_banner_view.ad_listener = _banner_cb
-	_banner_view.load_ad(AdRequest.new())
+	# 2. Left Side Banner Ad
+	if _banner_view_left == null:
+		print("[AdManager] Loading LEFT banner ad: %s" % BANNER_AD_ID)
+		_banner_view_left = AdView.new(BANNER_AD_ID, AdSize.BANNER, AdPosition.LEFT)
+		_banner_cb_left = AdListener.new()
+		_banner_cb_left.on_ad_loaded = func():
+			print("[AdManager] LEFT Banner ad loaded successfully!")
+			if _is_banner_requested and _banner_view_left != null and _banner_view_left.has_method("show"):
+				_banner_view_left.show()
+		_banner_cb_left.on_ad_failed_to_load = func(err):
+			var err_str: String = str(err.message if "message" in err else err)
+			print("[AdManager] LEFT Banner ad failed to load: ", err_str)
+		_banner_view_left.ad_listener = _banner_cb_left
+		_banner_view_left.load_ad(AdRequest.new())
 
 # Intermittent Banner Timer Settings:
 # Shows banner temporarily for 18 seconds, then hides it for 42 seconds!
@@ -202,19 +213,24 @@ func _apply_banner_visibility(is_visible: bool) -> void:
 		return
 
 	if not is_initialized:
-		if is_visible and _banner_view == null:
+		if is_visible and (_banner_view_right == null or _banner_view_left == null):
 			_load_banner()
 		return
 
-	if _banner_view == null:
+	if _banner_view_right == null or _banner_view_left == null:
 		if is_visible:
 			_load_banner()
-	elif is_visible:
-		if _banner_view.has_method("show"):
-			_banner_view.show()
+
+	if is_visible:
+		if _banner_view_right != null and _banner_view_right.has_method("show"):
+			_banner_view_right.show()
+		if _banner_view_left != null and _banner_view_left.has_method("show"):
+			_banner_view_left.show()
 	else:
-		if _banner_view.has_method("hide"):
-			_banner_view.hide()
+		if _banner_view_right != null and _banner_view_right.has_method("hide"):
+			_banner_view_right.hide()
+		if _banner_view_left != null and _banner_view_left.has_method("hide"):
+			_banner_view_left.hide()
 
 func _show_mock_desktop_banner() -> void:
 	if is_ads_removed:
@@ -228,37 +244,67 @@ func _show_mock_desktop_banner() -> void:
 	_mock_banner_layer.name = "MockBannerLayer"
 	add_child(_mock_banner_layer)
 
-	var banner_box := PanelContainer.new()
-	banner_box.custom_minimum_size = Vector2(50, 240)
-	# Anchored to right side instead of top or bottom to avoid blocking power-ups or HUD
-	banner_box.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
-	banner_box.offset_left = -55
-	banner_box.offset_right = -5
-	banner_box.offset_top = 220
-	banner_box.offset_bottom = -220
-	banner_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# 1. Left Side Banner
+	var left_box := PanelContainer.new()
+	left_box.custom_minimum_size = Vector2(48, 220)
+	left_box.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	left_box.offset_left = 6
+	left_box.offset_right = 54
+	left_box.offset_top = 220
+	left_box.offset_bottom = -220
+	left_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.10, 0.12, 0.16, 0.95)
-	style.border_color = Color("#f1c40f")
-	style.border_width_left = 2
-	style.corner_radius_top_left = 8
-	style.corner_radius_bottom_left = 8
-	banner_box.add_theme_stylebox_override("panel", style)
+	var l_style := StyleBoxFlat.new()
+	l_style.bg_color = Color(0.10, 0.12, 0.16, 0.95)
+	l_style.border_color = Color("#f1c40f")
+	l_style.border_width_right = 2
+	l_style.corner_radius_top_right = 8
+	l_style.corner_radius_bottom_right = 8
+	left_box.add_theme_stylebox_override("panel", l_style)
 
-	var vbox := VBoxContainer.new()
-	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	banner_box.add_child(vbox)
+	var l_vbox := VBoxContainer.new()
+	l_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	l_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	left_box.add_child(l_vbox)
 
-	var ad_badge := Label.new()
-	ad_badge.text = "[Ad]\nAdMob\nBanner"
-	ad_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	ad_badge.add_theme_color_override("font_color", Color("#ecf0f1"))
-	ad_badge.add_theme_font_size_override("font_size", 13)
-	vbox.add_child(ad_badge)
+	var l_badge := Label.new()
+	l_badge.text = "[Ad]\nLeft\nBanner"
+	l_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l_badge.add_theme_color_override("font_color", Color("#ecf0f1"))
+	l_badge.add_theme_font_size_override("font_size", 12)
+	l_vbox.add_child(l_badge)
+	_mock_banner_layer.add_child(left_box)
 
-	_mock_banner_layer.add_child(banner_box)
+	# 2. Right Side Banner
+	var right_box := PanelContainer.new()
+	right_box.custom_minimum_size = Vector2(48, 220)
+	right_box.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
+	right_box.offset_left = -54
+	right_box.offset_right = -6
+	right_box.offset_top = 220
+	right_box.offset_bottom = -220
+	right_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var r_style := StyleBoxFlat.new()
+	r_style.bg_color = Color(0.10, 0.12, 0.16, 0.95)
+	r_style.border_color = Color("#f1c40f")
+	r_style.border_width_left = 2
+	r_style.corner_radius_top_left = 8
+	r_style.corner_radius_bottom_left = 8
+	right_box.add_theme_stylebox_override("panel", r_style)
+
+	var r_vbox := VBoxContainer.new()
+	r_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	r_vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	right_box.add_child(r_vbox)
+
+	var r_badge := Label.new()
+	r_badge.text = "[Ad]\nRight\nBanner"
+	r_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	r_badge.add_theme_color_override("font_color", Color("#ecf0f1"))
+	r_badge.add_theme_font_size_override("font_size", 12)
+	r_vbox.add_child(r_badge)
+	_mock_banner_layer.add_child(right_box)
 
 # ==============================================================================
 # 2. INTERSTITIAL AD METHODS
@@ -453,8 +499,12 @@ func is_rewarded_ready() -> bool:
 func remove_all_ads() -> void:
 	is_ads_removed = true
 	hide_banner()
-	if _banner_view and _banner_view.has_method("destroy"):
-		_banner_view.destroy()
-		_banner_view = null
+	if _banner_view_right and _banner_view_right.has_method("destroy"):
+		_banner_view_right.destroy()
+		_banner_view_right = null
+	if _banner_view_left and _banner_view_left.has_method("destroy"):
+		_banner_view_left.destroy()
+		_banner_view_left = null
+	_banner_view = null
 	_interstitial_ad = null
 	print("[AdManager] Banner & Interstitial ads removed permanently ($4.99). Rewarded ads remain active.")
