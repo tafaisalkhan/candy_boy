@@ -227,11 +227,12 @@ func _run_granny_hud_test() -> void:
 	# 1. Test HUD visibility
 	print("1. Checking HUD elements...")
 	assert(item_collector_label != null, "item_collector_label must exist")
-	assert(item_collector_label.visible == false, "item_collector_label must be hidden")
+	assert(item_collector_label.visible == true, "item_collector_label must be visible in find item pill")
+	assert(item_collector_panel != null, "item_collector_panel must exist")
 	var obj_lbl = hud_root.get_node_or_null("ObjectiveLabel")
 	if obj_lbl != null:
 		assert(obj_lbl.visible == false, "ObjectiveLabel must be hidden")
-	print("   HUD elements check: PASSED (No black message/text banner)")
+	print("   HUD elements check: PASSED (Top-Center Find Item Pill is active)")
 
 	# 2. Test Granny Intelligence Progression
 	print("2. Checking Granny Intelligence Cycle...")
@@ -2267,41 +2268,55 @@ func _setup_hud() -> void:
 	coin_lbl.add_theme_color_override("font_color", Color("#2d3436"))
 	coin_box.add_child(coin_lbl)
 
-	# 4. Item Collector Widget at Top Left (Large, High-Contrast & Clearly Visible)
+	# 4. Item Collector Widget at Top Center directly under Level (Clean, Stylish Capsule Pill)
 	item_collector_panel = PanelContainer.new()
 	item_collector_panel.name = "ItemCollectorPanel"
-	item_collector_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	item_collector_panel.offset_left = 25.0
-	item_collector_panel.offset_top = 22.0
-	item_collector_panel.offset_right = 300.0
-	item_collector_panel.offset_bottom = 120.0
+	item_collector_panel.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	item_collector_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	item_collector_panel.offset_top = 88.0
+	item_collector_panel.offset_bottom = 144.0
+	item_collector_panel.offset_left = -90.0
+	item_collector_panel.offset_right = 90.0
 
-	var ic_style := StyleBoxEmpty.new()
+	var ic_style := StyleBoxFlat.new()
+	ic_style.bg_color = Color(0.10, 0.14, 0.22, 0.88)
+	ic_style.border_color = Color("#f1c40f")
+	ic_style.set_border_width_all(2)
+	ic_style.set_corner_radius_all(24)
+	ic_style.shadow_color = Color(0, 0, 0, 0.35)
+	ic_style.shadow_size = 6
 	item_collector_panel.add_theme_stylebox_override("panel", ic_style)
 	hud_root.add_child(item_collector_panel)
 
 	var ic_margin := MarginContainer.new()
-	ic_margin.add_theme_constant_override("margin_left", 6)
-	ic_margin.add_theme_constant_override("margin_top", 6)
-	ic_margin.add_theme_constant_override("margin_right", 6)
-	ic_margin.add_theme_constant_override("margin_bottom", 6)
+	ic_margin.add_theme_constant_override("margin_left", 14)
+	ic_margin.add_theme_constant_override("margin_top", 4)
+	ic_margin.add_theme_constant_override("margin_right", 14)
+	ic_margin.add_theme_constant_override("margin_bottom", 4)
 	item_collector_panel.add_child(ic_margin)
 
-	var ic_vbox := VBoxContainer.new()
-	ic_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	ic_vbox.add_theme_constant_override("separation", 4)
-	ic_margin.add_child(ic_vbox)
+	var ic_hbox := HBoxContainer.new()
+	ic_hbox.name = "ItemCollectorHBox"
+	ic_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	ic_hbox.add_theme_constant_override("separation", 10)
+	ic_margin.add_child(ic_hbox)
 
 	item_collector_label = Label.new()
-	item_collector_label.text = "🎒 ITEMS TO FIND: 0 / 1"
-	item_collector_label.visible = false
-	ic_vbox.add_child(item_collector_label)
+	item_collector_label.name = "FindPrefixLabel"
+	item_collector_label.text = "FIND:"
+	if game_title_font != null:
+		item_collector_label.add_theme_font_override("font", game_title_font)
+	item_collector_label.add_theme_font_size_override("font_size", 18)
+	item_collector_label.add_theme_color_override("font_color", Color("#f1c40f"))
+	item_collector_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	item_collector_label.add_theme_constant_override("outline_size", 4)
+	ic_hbox.add_child(item_collector_label)
 
 	var ic_slots_hbox := HBoxContainer.new()
 	ic_slots_hbox.name = "SlotsHBox"
 	ic_slots_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	ic_slots_hbox.add_theme_constant_override("separation", 10)
-	ic_vbox.add_child(ic_slots_hbox)
+	ic_slots_hbox.add_theme_constant_override("separation", 8)
+	ic_hbox.add_child(ic_slots_hbox)
 
 	# 3. Bottom Powerup Tray - Clean Minimalist Transparent Dock
 	var tray := PanelContainer.new()
@@ -2480,8 +2495,9 @@ func _populate_item_collector_hud() -> void:
 	collected_items_count = 0
 	all_items_collected = false
 	if is_instance_valid(item_collector_label):
-		item_collector_label.text = "🎒 ITEMS TO FIND: 0 / %d" % target_items_total
-		item_collector_label.visible = false
+		item_collector_label.text = "FIND:"
+		item_collector_label.add_theme_color_override("font_color", Color("#f1c40f"))
+		item_collector_label.visible = true
 
 	if is_instance_valid(hud_root):
 		var obj_lbl := hud_root.get_node_or_null("ObjectiveLabel") as Label
@@ -2492,13 +2508,13 @@ func _populate_item_collector_hud() -> void:
 		var it: Dictionary = target_items[i]
 		var slot := Panel.new()
 		slot.name = "Slot_%s" % it["id"]
-		slot.custom_minimum_size = Vector2(48, 48)
+		slot.custom_minimum_size = Vector2(46, 46)
 
 		var s_style := StyleBoxFlat.new()
-		s_style.bg_color = Color("#2d3436")
-		s_style.set_corner_radius_all(12)
-		s_style.border_color = Color("#74b9ff")
-		s_style.set_border_width_all(3)
+		s_style.bg_color = Color(0.14, 0.18, 0.26, 0.95)
+		s_style.set_corner_radius_all(14)
+		s_style.border_color = Color("#f39c12")
+		s_style.set_border_width_all(2)
 		slot.add_theme_stylebox_override("panel", s_style)
 		slots_hbox.add_child(slot)
 		item_slot_panels.append(slot)
@@ -2508,19 +2524,19 @@ func _populate_item_collector_hud() -> void:
 		icon_lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
 		icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		icon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		icon_lbl.add_theme_font_size_override("font_size", 26)
+		icon_lbl.add_theme_font_size_override("font_size", 28)
 		slot.add_child(icon_lbl)
 
 		# Checkmark Badge in top-right of slot
 		var check_badge := Label.new()
 		check_badge.text = "✓"
 		check_badge.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-		check_badge.offset_left = -22.0
-		check_badge.offset_top = 2.0
-		check_badge.offset_right = -2.0
-		check_badge.offset_bottom = 24.0
+		check_badge.offset_left = -20.0
+		check_badge.offset_top = 0.0
+		check_badge.offset_right = 0.0
+		check_badge.offset_bottom = 22.0
 		check_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		check_badge.add_theme_font_size_override("font_size", 20)
+		check_badge.add_theme_font_size_override("font_size", 18)
 		check_badge.add_theme_color_override("font_color", Color("#2ecc71"))
 		check_badge.add_theme_color_override("font_outline_color", Color.BLACK)
 		check_badge.add_theme_constant_override("outline_size", 6)
@@ -2531,11 +2547,11 @@ func _populate_item_collector_hud() -> void:
 func _update_item_collector_hud(collected_id: String) -> void:
 	if is_instance_valid(item_collector_label):
 		if collected_items_count >= target_items_total:
-			item_collector_label.text = "🎒 ALL ITEMS FOUND! (%d/%d) ✓" % [collected_items_count, target_items_total]
+			item_collector_label.text = "ESCAPE! 🚪"
 			item_collector_label.add_theme_color_override("font_color", Color("#2ecc71"))
 		else:
-			item_collector_label.text = "🎒 ITEMS TO FIND: %d / %d" % [collected_items_count, target_items_total]
-			item_collector_label.add_theme_color_override("font_color", Color("#ffeaa7"))
+			item_collector_label.text = "FIND:"
+			item_collector_label.add_theme_color_override("font_color", Color("#f1c40f"))
 
 	for i in range(target_items.size()):
 		var it: Dictionary = target_items[i]
@@ -2543,15 +2559,15 @@ func _update_item_collector_hud(collected_id: String) -> void:
 			if i < item_slot_panels.size():
 				var slot: Panel = item_slot_panels[i]
 				var s_style := StyleBoxFlat.new()
-				s_style.bg_color = Color("#27ae60")
-				s_style.set_corner_radius_all(12)
-				s_style.border_color = Color("#f1c40f")
-				s_style.set_border_width_all(3)
+				s_style.bg_color = Color("#1e824c")
+				s_style.set_corner_radius_all(14)
+				s_style.border_color = Color("#2ecc71")
+				s_style.set_border_width_all(2)
 				slot.add_theme_stylebox_override("panel", s_style)
 
 				# Bouncy punch tween
 				var tw := create_tween()
-				tw.tween_property(slot, "scale", Vector2(1.28, 1.28), 0.15).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				tw.tween_property(slot, "scale", Vector2(1.22, 1.22), 0.15).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 				tw.tween_property(slot, "scale", Vector2.ONE, 0.15)
 			if i < item_slot_badges.size():
 				item_slot_badges[i].visible = true
