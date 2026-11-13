@@ -629,10 +629,66 @@ func _start_intro_sequence() -> void:
 	if FileAccess.file_exists("res://test_loop.flag") or FileAccess.file_exists("res://test_door.flag"):
 		return
 
-	# Instant drop into gameplay - no long camera tour or forced wait!
-	is_intro_cinematic_active = false
+	# Collect all target items & cupboards to focus camera on item locations
+	var focus_targets: Array[Dictionary] = []
+	for c in active_containers:
+		if is_instance_valid(c.get("root")):
+			focus_targets.append({
+				"pos": c["pos"],
+				"beacon": c.get("beacon"),
+				"prompt": c.get("prompt"),
+				"name": c.get("name", "ITEM")
+			})
+	for it in active_open_items:
+		if is_instance_valid(it.get("node")) and not it.get("collected", false):
+			focus_targets.append({
+				"pos": it["pos"],
+				"beacon": it.get("node"),
+				"prompt": null,
+				"name": it.get("name", "ITEM")
+			})
+
 	var entrance_cam := Vector3(player_spawn_pos.x * 0.75, 27.5, player_spawn_pos.z + 4.5)
-	main_camera.position = entrance_cam
+	if focus_targets.is_empty():
+		main_camera.position = entrance_cam
+		is_intro_cinematic_active = false
+		return
+
+	is_intro_cinematic_active = true
+	intro_cinematic_tween = create_tween()
+
+	# Focus camera directly on where to find the items!
+	var max_targets := mini(focus_targets.size(), 2)
+	for i in range(max_targets):
+		var target: Dictionary = focus_targets[i]
+		var t_pos: Vector3 = target["pos"]
+		var target_cam := Vector3(t_pos.x * 0.85, 20.0, t_pos.z + 4.2)
+
+		# Fast, smooth glide to target item location (0.45s)
+		intro_cinematic_tween.tween_property(main_camera, "position", target_cam, 0.48).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+		# Highlight & pulse beacon so player sees exactly where the item is
+		intro_cinematic_tween.chain().tween_callback(func():
+			if is_instance_valid(target.get("beacon")):
+				var b_tw := create_tween()
+				b_tw.tween_property(target["beacon"], "scale", Vector3.ONE * 1.5, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				b_tw.tween_property(target["beacon"], "scale", Vector3.ONE, 0.18)
+			if is_instance_valid(target.get("prompt")):
+				target["prompt"].visible = true
+			if SoundManager != null:
+				SoundManager.play_sfx("cabinet")
+		)
+		intro_cinematic_tween.chain().tween_interval(0.40)
+		intro_cinematic_tween.chain().tween_callback(func():
+			if is_instance_valid(target.get("prompt")):
+				target["prompt"].visible = false
+		)
+
+	# Smoothly return camera to player spawn ready to play
+	intro_cinematic_tween.chain().tween_property(main_camera, "position", entrance_cam, 0.48).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	intro_cinematic_tween.chain().tween_callback(func():
+		_end_intro_sequence()
+	)
 
 func _show_mission_start_popup() -> void:
 	if not is_instance_valid(hud_root) or is_instance_valid(mission_intro_popup):
@@ -2536,6 +2592,11 @@ func _update_item_collector_hud(collected_id: String) -> void:
 				item_slot_badges[i].visible = true
 
 func _input(event: InputEvent) -> void:
+	if is_intro_cinematic_active:
+		if (event is InputEventScreenTouch and event.pressed) or (event is InputEventMouseButton and event.pressed) or (event is InputEventKey and event.pressed):
+			_skip_intro_sequence()
+			return
+
 	if is_spotted or is_level_cleared:
 		if is_touch_active:
 			_reset_mobile_touch()
