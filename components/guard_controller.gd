@@ -16,6 +16,15 @@ var visual_node: Node3D = null
 var anim_player: AnimationPlayer = null
 var cone_mesh: ImmediateMesh = null
 var cone_instance: MeshInstance3D = null
+var cone_mat: StandardMaterial3D = null
+var badge_label_3d: Label3D = null
+var alert_ring: MeshInstance3D = null
+
+var is_intelligent: bool = false
+var room_aabb: AABB = AABB()
+var is_hunting_player: bool = false
+var base_speed: float = 3.0
+
 var waypoints: Array[Vector3] = []
 var wp_idx: int = 1
 var patrol_dir: int = 1
@@ -32,8 +41,54 @@ func setup(p_waypoints: Array[Vector3], p_range: float = 2.0, p_angle: float = 2
 	max_vision_range = p_range
 	current_vision_range = p_range
 	vision_angle = p_angle
+	base_speed = p_speed
 	move_speed = p_speed
 	_build_visuals(p_tint)
+
+func set_room_bounds(p_bounds: AABB) -> void:
+	room_aabb = p_bounds
+
+func set_intelligent(p_intel: bool) -> void:
+	is_intelligent = p_intel
+	if is_intelligent:
+		move_speed = base_speed * 1.25
+		current_vision_range = max_vision_range * 1.15
+		if is_instance_valid(badge_label_3d):
+			badge_label_3d.text = "🚨 SMART GRANNY 🚨"
+			badge_label_3d.modulate = Color("#ff3838")
+			badge_label_3d.outline_modulate = Color("#7f1d1d")
+		if is_instance_valid(cone_mat):
+			cone_mat.albedo_color = Color(1.0, 0.15, 0.15, 0.85)
+		if alert_ring == null:
+			_create_alert_ring()
+		if is_instance_valid(alert_ring):
+			alert_ring.visible = true
+	else:
+		move_speed = base_speed
+		current_vision_range = max_vision_range
+		if is_instance_valid(badge_label_3d):
+			badge_label_3d.text = "AVOID GRANNY"
+			badge_label_3d.modulate = Color.WHITE
+			badge_label_3d.outline_modulate = Color.BLACK
+		if is_instance_valid(cone_mat):
+			cone_mat.albedo_color = Color(0.96, 0.12, 0.22, 0.72)
+		if is_instance_valid(alert_ring):
+			alert_ring.visible = false
+
+func _create_alert_ring() -> void:
+	alert_ring = MeshInstance3D.new()
+	alert_ring.name = "AlertRing"
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.55
+	torus.outer_radius = 0.72
+	alert_ring.mesh = torus
+	alert_ring.position = Vector3(0.0, 0.06, 0.0)
+	var a_mat := StandardMaterial3D.new()
+	a_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	a_mat.albedo_color = Color(1.0, 0.1, 0.1, 0.85)
+	a_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	alert_ring.material_override = a_mat
+	add_child(alert_ring)
 
 func _build_visuals(p_tint: Color) -> void:
 	visual_node = Node3D.new()
@@ -99,6 +154,7 @@ func _build_visuals(p_tint: Color) -> void:
 	label_3d.outline_modulate = Color.BLACK
 	label_3d.modulate = Color.WHITE
 	badge_node.add_child(label_3d)
+	badge_label_3d = label_3d
 
 	# 2. Vision Cone Mesh
 	cone_mesh = ImmediateMesh.new()
@@ -106,7 +162,7 @@ func _build_visuals(p_tint: Color) -> void:
 	cone_instance.name = "GrannyVisionCone"
 	cone_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	cone_instance.mesh = cone_mesh
-	var cone_mat := StandardMaterial3D.new()
+	cone_mat = StandardMaterial3D.new()
 	cone_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	cone_mat.albedo_color = Color(0.96, 0.12, 0.22, 0.72)
 	cone_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -129,6 +185,56 @@ func _test_guard_collision(test_pos: Vector3, colliders: Array[AABB], radius: fl
 	return false
 
 func update_guard(delta: float, p_pos: Vector3, wall_colliders: Array[AABB], is_player_invisible: bool = false) -> void:
+	# Animate alert ring if active
+	if is_instance_valid(alert_ring) and alert_ring.visible:
+		alert_ring.rotation.y += delta * 2.5
+
+	# Check if player has entered Granny's assigned section/room
+	var player_in_section: bool = false
+	if room_aabb.size.length_squared() > 1.0:
+		player_in_section = room_aabb.has_point(p_pos)
+	else:
+		player_in_section = position.distance_to(p_pos) < 6.5
+
+	# Intelligent Granny: Immediately turns to catch player when player enters her section!
+	# Player MUST use a power-up (e.g. Invisibility) to escape / survive!
+	if is_intelligent and player_in_section and not is_player_invisible:
+		is_hunting_player = true
+		var to_player := p_pos - position
+		to_player.y = 0.0
+		var dist_to_p := to_player.length()
+
+		if dist_to_p > 0.05:
+			var chase_dir := to_player.normalized()
+			facing_yaw = lerp_angle(facing_yaw, atan2(chase_dir.x, chase_dir.z), minf(1.0, delta * 14.0))
+			if is_instance_valid(visual_node):
+				visual_node.rotation.y = facing_yaw + PI
+
+			var chase_speed: float = move_speed * 1.25
+			var step := chase_dir * chase_speed * delta
+			var next_pos := position + step
+
+			if not _test_guard_collision(next_pos, wall_colliders, 0.30):
+				position = next_pos
+			else:
+				var slide_dir1 := Vector3(-chase_dir.z, 0.0, chase_dir.x)
+				var slide_dir2 := Vector3(chase_dir.z, 0.0, -chase_dir.x)
+				var chosen := slide_dir1 if (position + slide_dir1).distance_to(p_pos) < (position + slide_dir2).distance_to(p_pos) else slide_dir2
+				if not _test_guard_collision(position + chosen * chase_speed * delta, wall_colliders, 0.30):
+					position += chosen * chase_speed * delta
+
+			_play_anim("Walk")
+
+			# Render vision cone while chasing
+			var g_fwd := Vector3(sin(facing_yaw), 0.0, cos(facing_yaw)).normalized()
+			var org := position + Vector3(0.0, 0.05, 0.0)
+			_render_vision_cone(org, g_fwd, current_vision_range, vision_angle, wall_colliders)
+
+			if dist_to_p < 1.05:
+				player_spotted.emit("Caught by Smart Granny! Use a Power-up!")
+			return
+
+	is_hunting_player = false
 	# 1. Waypoint Patrol Navigation with Strict Wall Collision Resolution & Anti-Stuck Watchdog
 	if waypoints.size() >= 2:
 		# Anti-Stuck Watchdog: detect if Granny has been immobile for >0.6s

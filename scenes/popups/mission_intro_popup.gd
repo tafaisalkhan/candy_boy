@@ -44,9 +44,9 @@ func _rebuild_item_cards() -> void:
 		var name_str: String = it.get("name", "ITEM").to_upper()
 		_add_single_item_card(icon_str, name_str)
 
-func _add_single_item_card(icon_str: String, name_str: String) -> void:
+func _add_single_item_card(icon_str: String, _name_str: String) -> void:
 	var item_card := PanelContainer.new()
-	item_card.custom_minimum_size = Vector2(120, 120)
+	item_card.custom_minimum_size = Vector2(110, 110)
 	var c_style := StyleBoxFlat.new()
 	c_style.bg_color = Color(0.12, 0.17, 0.25, 0.95)
 	c_style.border_color = Color("#f1c40f")
@@ -58,25 +58,14 @@ func _add_single_item_card(icon_str: String, name_str: String) -> void:
 
 	var c_vbox := VBoxContainer.new()
 	c_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	c_vbox.add_theme_constant_override("separation", 4)
 	item_card.add_child(c_vbox)
 
 	var icon_lbl := Label.new()
 	icon_lbl.text = icon_str
 	icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	icon_lbl.add_theme_font_size_override("font_size", 52)
+	icon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	icon_lbl.add_theme_font_size_override("font_size", 60)
 	c_vbox.add_child(icon_lbl)
-
-	var name_lbl := Label.new()
-	name_lbl.text = name_str
-	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	if game_title_font != null:
-		name_lbl.add_theme_font_override("font", game_title_font)
-	name_lbl.add_theme_font_size_override("font_size", 16)
-	name_lbl.add_theme_color_override("font_color", Color("#00cec9"))
-	name_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
-	name_lbl.add_theme_constant_override("outline_size", 4)
-	c_vbox.add_child(name_lbl)
 
 	items_hbox.add_child(item_card)
 

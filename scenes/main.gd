@@ -59,6 +59,10 @@ var active_open_items: Array[Dictionary] = []
 var item_collector_panel: PanelContainer = null
 var item_collector_label: Label = null
 
+# Granny Intelligence Streak Tracker
+var levels_completed_streak: int = 0
+var is_intelligent_granny_active: bool = false
+
 # Mobile Virtual Joystick & Touch Movement
 var is_touch_active: bool = false
 var touch_start_pos: Vector2 = Vector2.ZERO
@@ -200,6 +204,8 @@ func _ready() -> void:
 		_test_mission_intro_screenshot()
 	elif "--test-touch" in all_args:
 		_test_mobile_touch_movement()
+	elif "--test-granny-hud" in all_args:
+		_run_granny_hud_test()
 	elif GameManager != null and not GameManager.is_privacy_policy_accepted:
 		call_deferred("_show_privacy_policy_popup")
 
@@ -215,6 +221,98 @@ func _show_privacy_policy_popup() -> void:
 			privacy_popup = null
 		)
 		hud_root.add_child(privacy_popup)
+
+func _run_granny_hud_test() -> void:
+	print("--- BEGIN GRANNY & HUD VERIFICATION ---")
+	# 1. Test HUD visibility
+	print("1. Checking HUD elements...")
+	assert(item_collector_label != null, "item_collector_label must exist")
+	assert(item_collector_label.visible == false, "item_collector_label must be hidden")
+	var obj_lbl = hud_root.get_node_or_null("ObjectiveLabel")
+	if obj_lbl != null:
+		assert(obj_lbl.visible == false, "ObjectiveLabel must be hidden")
+	print("   HUD elements check: PASSED (No black message/text banner)")
+
+	# 2. Test Granny Intelligence Progression
+	print("2. Checking Granny Intelligence Cycle...")
+	assert(levels_completed_streak == 0, "Initial streak should be 0")
+	assert(is_intelligent_granny_active == false, "Granny should be normal on level 1")
+
+	# Win level 1
+	_on_continue_pressed()
+	assert(levels_completed_streak == 1, "Streak should be 1 after 1 win")
+	assert(is_intelligent_granny_active == false, "Granny should be normal on level 2")
+
+	# Win level 2
+	_on_continue_pressed()
+	assert(levels_completed_streak == 2, "Streak should be 2 after 2 wins")
+	assert(is_intelligent_granny_active == true, "Granny MUST be intelligent on level 3!")
+	print("   Level 3 Granny Intelligence: ACTIVE! (Streak: %d)" % levels_completed_streak)
+
+	# Verify guard in level 3 is intelligent
+	var has_intelligent_guard := false
+	for g in active_guards:
+		if is_instance_valid(g) and g.is_intelligent:
+			has_intelligent_guard = true
+			break
+	assert(has_intelligent_guard, "Active guards on level 3 must be intelligent")
+	print("   Guard controller intelligent mode: PASSED")
+
+	# 3. Test Retry Reset
+	print("3. Checking Retry Reset behavior...")
+	_on_retry_pressed()
+	assert(levels_completed_streak == 0, "Streak MUST reset to 0 on retry/restart")
+	assert(is_intelligent_granny_active == false, "Granny MUST NOT be intelligent on retry")
+	for g in active_guards:
+		if is_instance_valid(g):
+			assert(g.is_intelligent == false, "Guard must be back to normal on retry")
+	print("   Retry reset check: PASSED (Granny normal after restart)")
+
+	# 4. Test Complete After Intelligent Granny
+	print("4. Checking Cycle Repeat after beating intelligent level...")
+	levels_completed_streak = 2
+	load_level(current_level)
+	assert(is_intelligent_granny_active == true, "Granny is intelligent")
+	_on_continue_pressed()
+	assert(levels_completed_streak == 0, "Streak must reset after intelligent level is won")
+	assert(is_intelligent_granny_active == false, "Granny must return to normal after beating smart granny")
+	print("   Cycle repeat check: PASSED")
+
+	# 5. Test Mission Intro Popup
+	print("5. Checking Mission Intro Popup item cards...")
+	var popup_scene := load("res://scenes/popups/mission_intro_popup.tscn") as PackedScene
+	var popup = popup_scene.instantiate()
+	hud_root.add_child(popup)
+	popup.set_target_items([{"icon": "🍭", "name": "candy"}, {"icon": "🧸", "name": "teddy"}])
+	for card in popup.items_hbox.get_children():
+		var vbox = card.get_child(0)
+		assert(vbox.get_child_count() == 1, "Only 1 child (icon_lbl) should exist in card vbox, no name description!")
+	print("   Mission Intro Popup check: PASSED (Only item icons shown, no descriptions)")
+	popup.queue_free()
+
+	# 6. Test Smart Granny Hunting in Section & Power-up Evasion
+	print("6. Checking Smart Granny Hunting & Power-up Evasion...")
+	levels_completed_streak = 2
+	load_level(1)
+	assert(active_guards.size() > 0, "Must have guards")
+	var smart_guard = active_guards[0]
+	assert(smart_guard.is_intelligent, "Guard must be intelligent")
+	
+	var test_player_pos = smart_guard.position + Vector3(2.0, 0.0, 0.0)
+	var test_colliders: Array[AABB] = []
+	
+	# Player in section (visible) -> Hunts!
+	smart_guard.update_guard(0.016, test_player_pos, test_colliders, false)
+	assert(smart_guard.is_hunting_player == true, "Smart Granny must hunt player when inside her section!")
+	print("   Section hunt activation: PASSED")
+	
+	# Player activates Invisibility -> Stops hunting!
+	smart_guard.update_guard(0.016, test_player_pos, test_colliders, true)
+	assert(smart_guard.is_hunting_player == false, "Smart Granny must stop hunting when player is invisible!")
+	print("   Invisibility power-up evasion: PASSED")
+
+	print("--- ALL GRANNY & HUD TESTS PASSED SUCCESSFULLY! ---")
+	get_tree().quit(0)
 
 func _test_mobile_touch_movement() -> void:
 	await get_tree().create_timer(0.4).timeout
@@ -454,6 +552,11 @@ func load_level(lvl: int) -> void:
 	cupboard_prompt = null
 	is_cupboard_open = false
 
+	# Intelligent Granny cycle: activates every 2-3 completed levels
+	is_intelligent_granny_active = (levels_completed_streak >= 2)
+	if is_intelligent_granny_active:
+		print("SMART_GRANNY: Active on level %d! (Streak: %d)" % [lvl, levels_completed_streak])
+
 	# Multi-Item Collection State Reset
 	target_items.clear()
 	collected_items_count = 0
@@ -548,7 +651,7 @@ func _start_intro_sequence() -> void:
 		# Glide camera to cabinet
 		intro_cinematic_tween.tween_property(main_camera, "position", target_cam, 1.0).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
-		# Pulse cabinet beacon and show toast
+		# Pulse cabinet beacon
 		intro_cinematic_tween.chain().tween_callback(func():
 			if is_instance_valid(c.get("beacon")):
 				var b_tw := create_tween()
@@ -558,7 +661,6 @@ func _start_intro_sequence() -> void:
 				c["prompt"].visible = true
 			if SoundManager != null:
 				SoundManager.play_sfx("cabinet")
-			_show_powerup_toast("🎯 TARGET: %s %s" % [c.get("icon", "🎁"), c.get("name", "ITEM").to_upper()], Color("#f1c40f"))
 		)
 		intro_cinematic_tween.chain().tween_interval(1.1)
 		intro_cinematic_tween.chain().tween_callback(func():
@@ -597,7 +699,6 @@ func _end_intro_sequence() -> void:
 		tw.tween_property(mission_intro_popup, "modulate:a", 0.0, 0.25)
 		tw.chain().tween_callback(mission_intro_popup.queue_free)
 	is_intro_cinematic_active = false
-	_show_powerup_toast("READY... GO! 🚀", Color("#2ecc71"))
 
 func _build_level_geometry() -> void:
 	var rooms: Array = active_level_data.get("rooms", [])
@@ -890,6 +991,9 @@ func _build_level_geometry() -> void:
 
 			var guard := GuardController.new()
 			guard.setup(waypoints, g_range, g_angle, g_speed, tint)
+			guard.set_intelligent(is_intelligent_granny_active)
+			var room_bounds := AABB(Vector3(r_center.x - cur_half_w, -1.0, r_center.z - cur_half_d), Vector3(cur_w, 10.0, cur_d))
+			guard.set_room_bounds(room_bounds)
 			guard.player_spotted.connect(_trigger_fail)
 			r_node.add_child(guard)
 			active_guards.append(guard)
@@ -2111,10 +2215,11 @@ func _setup_hud() -> void:
 	lvl_lbl.add_theme_constant_override("outline_size", 9)
 	hud_root.add_child(lvl_lbl)
 
-	# Objective Sub-Label (Large, High-Contrast & Clearly Visible)
+	# Objective Sub-Label (Hidden - only items and icons shown)
 	var obj_lbl := Label.new()
 	obj_lbl.name = "ObjectiveLabel"
-	obj_lbl.text = "SNEAK IN & GET THE CANDY!"
+	obj_lbl.text = ""
+	obj_lbl.visible = false
 	obj_lbl.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	obj_lbl.offset_top = 80.0
 	obj_lbl.offset_bottom = 118.0
@@ -2171,37 +2276,25 @@ func _setup_hud() -> void:
 	item_collector_panel.offset_right = 300.0
 	item_collector_panel.offset_bottom = 120.0
 
-	var ic_style := StyleBoxFlat.new()
-	ic_style.bg_color = Color(0.10, 0.14, 0.22, 0.94)
-	ic_style.set_corner_radius_all(20)
-	ic_style.border_color = Color("#00cec9")
-	ic_style.set_border_width_all(3)
-	ic_style.shadow_color = Color(0.0, 0.0, 0.0, 0.35)
-	ic_style.shadow_size = 8
+	var ic_style := StyleBoxEmpty.new()
 	item_collector_panel.add_theme_stylebox_override("panel", ic_style)
 	hud_root.add_child(item_collector_panel)
 
 	var ic_margin := MarginContainer.new()
-	ic_margin.add_theme_constant_override("margin_left", 14)
-	ic_margin.add_theme_constant_override("margin_top", 10)
-	ic_margin.add_theme_constant_override("margin_right", 14)
-	ic_margin.add_theme_constant_override("margin_bottom", 10)
+	ic_margin.add_theme_constant_override("margin_left", 6)
+	ic_margin.add_theme_constant_override("margin_top", 6)
+	ic_margin.add_theme_constant_override("margin_right", 6)
+	ic_margin.add_theme_constant_override("margin_bottom", 6)
 	item_collector_panel.add_child(ic_margin)
 
 	var ic_vbox := VBoxContainer.new()
 	ic_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	ic_vbox.add_theme_constant_override("separation", 8)
+	ic_vbox.add_theme_constant_override("separation", 4)
 	ic_margin.add_child(ic_vbox)
 
 	item_collector_label = Label.new()
 	item_collector_label.text = "🎒 ITEMS TO FIND: 0 / 1"
-	item_collector_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	if game_title_font != null:
-		item_collector_label.add_theme_font_override("font", game_title_font)
-	item_collector_label.add_theme_font_size_override("font_size", 22)
-	item_collector_label.add_theme_color_override("font_color", Color("#ffeaa7"))
-	item_collector_label.add_theme_color_override("font_outline_color", Color.BLACK)
-	item_collector_label.add_theme_constant_override("outline_size", 8)
+	item_collector_label.visible = false
 	ic_vbox.add_child(item_collector_label)
 
 	var ic_slots_hbox := HBoxContainer.new()
@@ -2388,15 +2481,12 @@ func _populate_item_collector_hud() -> void:
 	all_items_collected = false
 	if is_instance_valid(item_collector_label):
 		item_collector_label.text = "🎒 ITEMS TO FIND: 0 / %d" % target_items_total
-		item_collector_label.add_theme_color_override("font_color", Color("#ffeaa7"))
+		item_collector_label.visible = false
 
 	if is_instance_valid(hud_root):
 		var obj_lbl := hud_root.get_node_or_null("ObjectiveLabel") as Label
 		if is_instance_valid(obj_lbl):
-			if target_items_total == 1:
-				obj_lbl.text = "SNEAK IN & GET THE %s!" % String(target_items[0].get("name", "ITEM")).to_upper()
-			else:
-				obj_lbl.text = "FIND ALL %d HIDDEN ITEMS & ESCAPE!" % target_items_total
+			obj_lbl.visible = false
 
 	for i in range(target_items.size()):
 		var it: Dictionary = target_items[i]
@@ -2979,6 +3069,13 @@ func _on_continue_pressed() -> void:
 		victory_popup.queue_free()
 		victory_popup = null
 
+	# Granny Intelligence Streak: if intelligent granny was beaten, reset cycle
+	if is_intelligent_granny_active:
+		levels_completed_streak = 0
+		is_intelligent_granny_active = false
+	else:
+		levels_completed_streak += 1
+
 	# Show Interstitial Ad (every 2 completed levels)
 	var ad_mgr = get_tree().root.get_node_or_null("AdManager")
 	if ad_mgr != null and ad_mgr.has_method("on_level_finished_check_interstitial"):
@@ -3008,6 +3105,9 @@ func _on_retry_pressed() -> void:
 	is_spotted = false
 	is_level_cleared = false
 	candy_collected = false
+	# If level restarted, Granny is NOT intelligent and streak resets to 0
+	is_intelligent_granny_active = false
+	levels_completed_streak = 0
 	load_level(current_level)
 
 func _update_hud() -> void:
