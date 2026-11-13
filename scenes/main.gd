@@ -629,52 +629,10 @@ func _start_intro_sequence() -> void:
 	if FileAccess.file_exists("res://test_loop.flag") or FileAccess.file_exists("res://test_door.flag"):
 		return
 
-	is_intro_cinematic_active = true
-	_show_mission_start_popup()
-
-	var target_cabs: Array = []
-	for c in active_containers:
-		if is_instance_valid(c.get("root")):
-			target_cabs.append(c)
-
-	if target_cabs.is_empty():
-		await get_tree().create_timer(1.2).timeout
-		_end_intro_sequence()
-		return
-
-	intro_cinematic_tween = create_tween()
-
-	for i in range(target_cabs.size()):
-		var c = target_cabs[i]
-		var c_pos: Vector3 = c["pos"]
-		var target_cam := Vector3(c_pos.x * 0.85, 20.0, c_pos.z + 4.2)
-
-		# Glide camera to cabinet
-		intro_cinematic_tween.tween_property(main_camera, "position", target_cam, 1.0).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-
-		# Pulse cabinet beacon
-		intro_cinematic_tween.chain().tween_callback(func():
-			if is_instance_valid(c.get("beacon")):
-				var b_tw := create_tween()
-				b_tw.tween_property(c["beacon"], "scale", Vector3.ONE * 1.5, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-				b_tw.tween_property(c["beacon"], "scale", Vector3.ONE, 0.22)
-			if is_instance_valid(c.get("prompt")):
-				c["prompt"].visible = true
-			if SoundManager != null:
-				SoundManager.play_sfx("cabinet")
-		)
-		intro_cinematic_tween.chain().tween_interval(1.1)
-		intro_cinematic_tween.chain().tween_callback(func():
-			if is_instance_valid(c.get("prompt")):
-				c["prompt"].visible = false
-		)
-
-	# Glide camera smoothly back to entrance door / player spawn
+	# Instant drop into gameplay - no long camera tour or forced wait!
+	is_intro_cinematic_active = false
 	var entrance_cam := Vector3(player_spawn_pos.x * 0.75, 27.5, player_spawn_pos.z + 4.5)
-	intro_cinematic_tween.chain().tween_property(main_camera, "position", entrance_cam, 1.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	intro_cinematic_tween.chain().tween_callback(func():
-		_end_intro_sequence()
-	)
+	main_camera.position = entrance_cam
 
 func _show_mission_start_popup() -> void:
 	if not is_instance_valid(hud_root) or is_instance_valid(mission_intro_popup):
@@ -1789,18 +1747,10 @@ func _build_player() -> void:
 
 	player_root = Node3D.new()
 	player_root.name = "Player"
-	# Start player OUTSIDE the south entrance door and walk IN when level starts!
-	player_root.position = entrance_outside_pos
-	is_entering_level = true
+	# Drop player directly at spawn position inside room - ready to control instantly!
+	player_root.position = player_spawn_pos
+	is_entering_level = false
 	level_root.add_child(player_root)
-
-	# Entrance watchdog: ensures player never gets stuck in entrance mode
-	get_tree().create_timer(1.6).timeout.connect(func():
-		if is_entering_level:
-			is_entering_level = false
-			if is_instance_valid(player_root):
-				player_root.position = player_spawn_pos
-	)
 
 	var boy_inst: Node3D = BOY_MODEL.instantiate() as Node3D
 	player_mesh = boy_inst
