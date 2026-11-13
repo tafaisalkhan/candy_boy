@@ -1986,7 +1986,7 @@ func _on_item_collected(item_id: String, item_name: String, _icon: String, item_
 				item_node.queue_free()
 		)
 
-	_show_powerup_toast("%s COLLECTED! (%d/%d ITEMS FOUND)" % [item_name.to_upper(), collected_items_count, target_items_total], Color("#ffeaa7"))
+	_show_powerup_toast("%s RETRIEVED! (%d/%d ITEMS RECOVERED)" % [item_name.to_upper(), collected_items_count, target_items_total], Color("#ffeaa7"))
 	_update_item_collector_hud(item_id)
 	if SignalHub != null:
 		SignalHub.emit_item_collected(item_id, item_name, collected_items_count, target_items_total)
@@ -1994,8 +1994,8 @@ func _on_item_collected(item_id: String, item_name: String, _icon: String, item_
 	if collected_items_count >= target_items_total:
 		all_items_collected = true
 		candy_collected = true
-		_update_hud_objective("🏃 ALL ITEMS COLLECTED! RETURN TO START TO ESCAPE!")
-		_show_powerup_toast("🎉 ALL ITEMS FOUND! RETURN TO START TO ESCAPE!", Color("#2ecc71"))
+		_update_hud_objective("🏃 ALL ITEMS RECOVERED! RETURN TO START TO ESCAPE!")
+		_show_powerup_toast("🎉 ALL ITEMS RETRIEVED! RETURN TO START TO ESCAPE!", Color("#2ecc71"))
 		if is_instance_valid(spawn_marker_label):
 			spawn_marker_label.text = "🚪 ESCAPE HERE!"
 			spawn_marker_label.modulate = Color("#2ecc71")
