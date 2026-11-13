@@ -33,6 +33,8 @@ var is_ads_removed: bool = false
 var _banner_view = null
 var _interstitial_ad = null
 var _rewarded_ad = null
+var _is_banner_requested: bool = false
+var _mock_banner_layer: CanvasLayer = null
 
 # Persistent Callbacks (Kept alive in memory to prevent garbage collection)
 var _init_listener = null
@@ -112,11 +114,14 @@ func _load_banner() -> void:
 	if not _plugin_available or not is_initialized or is_ads_removed or _banner_view != null:
 		return
 
+	print("[AdManager] Loading banner ad unit: %s" % BANNER_AD_ID)
 	_banner_view = AdView.new(BANNER_AD_ID, AdSize.BANNER, AdPosition.BOTTOM)
 	_banner_cb = AdListener.new()
 	_banner_cb.on_ad_loaded = func():
 		print("[AdManager] Banner ad loaded successfully!")
 		banner_loaded.emit()
+		if _is_banner_requested and _banner_view != null and _banner_view.has_method("show"):
+			_banner_view.show()
 
 	_banner_cb.on_ad_failed_to_load = func(err):
 		var err_str: String = str(err.message if "message" in err else err)
@@ -127,7 +132,7 @@ func _load_banner() -> void:
 			var tw := instance.create_tween()
 			tw.tween_interval(25.0)
 			tw.tween_callback(func():
-				if _banner_view == null and not is_ads_removed:
+				if _banner_view == null and not is_ads_removed and _is_banner_requested:
 					_load_banner()
 			)
 
@@ -136,19 +141,71 @@ func _load_banner() -> void:
 
 func show_banner() -> void:
 	if is_ads_removed:
+		print("[AdManager] Banner not shown: Ads removed via IAP.")
 		return
+
+	_is_banner_requested = true
+
 	if not _plugin_available:
-		print("[AdManager-Mock] show_banner() called in desktop mode.")
+		print("[AdManager-Mock] show_banner() running in desktop simulation.")
+		_show_mock_desktop_banner()
 		return
+
+	if not is_initialized:
+		print("[AdManager] Banner requested, but MobileAds SDK is still initializing... Will show automatically once loaded.")
+		return
+
 	if _banner_view == null:
-		if is_initialized:
-			_load_banner()
+		print("[AdManager] Banner requested, loading now...")
+		_load_banner()
 	elif _banner_view.has_method("show"):
+		print("[AdManager] Showing Banner ad...")
 		_banner_view.show()
 
 func hide_banner() -> void:
+	_is_banner_requested = false
 	if _banner_view and _banner_view.has_method("hide"):
 		_banner_view.hide()
+	if is_instance_valid(_mock_banner_layer):
+		_mock_banner_layer.visible = false
+
+func _show_mock_desktop_banner() -> void:
+	if is_ads_removed:
+		return
+	if is_instance_valid(_mock_banner_layer):
+		_mock_banner_layer.visible = true
+		return
+
+	_mock_banner_layer = CanvasLayer.new()
+	_mock_banner_layer.layer = 120
+	_mock_banner_layer.name = "MockBannerLayer"
+	add_child(_mock_banner_layer)
+
+	var banner_box := PanelContainer.new()
+	banner_box.custom_minimum_size = Vector2(480, 50)
+	banner_box.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	banner_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	banner_box.offset_top = -50
+	banner_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.10, 0.12, 0.16, 0.95)
+	style.border_color = Color("#f1c40f")
+	style.border_width_top = 2
+	banner_box.add_theme_stylebox_override("panel", style)
+
+	var hbox := HBoxContainer.new()
+	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	banner_box.add_child(hbox)
+
+	var ad_badge := Label.new()
+	ad_badge.text = "[Ad] Google AdMob Banner (320x50)"
+	ad_badge.add_theme_color_override("font_color", Color("#ecf0f1"))
+	ad_badge.add_theme_font_size_override("font_size", 16)
+	hbox.add_child(ad_badge)
+
+	_mock_banner_layer.add_child(banner_box)
 
 # ==============================================================================
 # 2. INTERSTITIAL AD METHODS

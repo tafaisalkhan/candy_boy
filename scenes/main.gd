@@ -160,9 +160,12 @@ func _ready() -> void:
 	load_level(current_level)
 
 	# Show Banner Ad on bottom of screen (AdMob)
-	var ad_mgr = get_tree().root.get_node_or_null("AdManager")
-	if ad_mgr != null and ad_mgr.has_method("show_banner"):
-		ad_mgr.show_banner()
+	if AdManager != null and AdManager.has_method("show_banner"):
+		AdManager.show_banner()
+	else:
+		var ad_mgr = get_tree().root.get_node_or_null("AdManager")
+		if ad_mgr != null and ad_mgr.has_method("show_banner"):
+			ad_mgr.show_banner()
 
 	if "--screen-game" in all_args or "--screenshot" in all_args or FileAccess.file_exists("res://test_screenshot.flag"):
 		if FileAccess.file_exists("res://test_screenshot.flag"):
