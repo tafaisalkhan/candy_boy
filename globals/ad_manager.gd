@@ -46,6 +46,10 @@ var _reward_listener = null
 # Active pending reward callback
 var _pending_reward_callback: Callable = Callable()
 
+# Pause & Resume Tracking for Ads
+var _was_game_paused_before_ad: bool = false
+var _is_ad_showing: bool = false
+
 # Interstitial Level Counter (e.g. show interstitial every 2 completed levels)
 var levels_since_last_interstitial: int = 0
 const INTERSTITIAL_LEVEL_INTERVAL: int = 2
@@ -54,6 +58,7 @@ func _enter_tree() -> void:
 	instance = self
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	print("[AdManager] Initializing AdManager...")
 	if OS.get_name() == "Android" or OS.get_name() == "iOS":
 		_plugin_available = true
@@ -79,6 +84,25 @@ func _init_mobile_ads() -> void:
 		MobileAds.initialize(_init_listener)
 	else:
 		print("[AdManager] MobileAds native plugin not available in this build.")
+
+
+func _pause_game_for_ad() -> void:
+	if _is_ad_showing:
+		return
+	_is_ad_showing = true
+	_was_game_paused_before_ad = get_tree().paused
+	get_tree().paused = true
+	if SoundManager != null:
+		SoundManager.stop_or_duck_bgm(true)
+
+
+func _resume_game_from_ad() -> void:
+	if not _is_ad_showing:
+		return
+	_is_ad_showing = false
+	get_tree().paused = _was_game_paused_before_ad
+	if SoundManager != null and SoundManager.music_enabled:
+		SoundManager.start_bgm()
 
 # ==============================================================================
 # 1. BANNER AD METHODS
@@ -146,6 +170,7 @@ func _load_interstitial() -> void:
 		_interstitial_content_cb.on_ad_dismissed_full_screen_content = func():
 			print("[AdManager] Interstitial ad dismissed by user.")
 			_interstitial_ad = null
+			_resume_game_from_ad()
 			interstitial_dismissed.emit()
 			# Automatically preload the next interstitial
 			_load_interstitial()
@@ -154,6 +179,7 @@ func _load_interstitial() -> void:
 			var err_str: String = str(err.message if "message" in err else err)
 			print("[AdManager] Interstitial ad failed to show: ", err_str)
 			_interstitial_ad = null
+			_resume_game_from_ad()
 			interstitial_failed.emit(err_str)
 			_load_interstitial()
 
@@ -179,11 +205,22 @@ func show_interstitial() -> bool:
 		return false
 	if not _plugin_available:
 		print("[AdManager-Mock] show_interstitial() invoked (desktop simulation).")
-		interstitial_dismissed.emit()
+		_pause_game_for_ad()
+		if is_instance_valid(instance):
+			var tw := instance.create_tween()
+			tw.tween_interval(0.6)
+			tw.tween_callback(func():
+				_resume_game_from_ad()
+				interstitial_dismissed.emit()
+			)
+		else:
+			_resume_game_from_ad()
+			interstitial_dismissed.emit()
 		return true
 
 	if _interstitial_ad != null:
 		print("[AdManager] Displaying Interstitial Ad...")
+		_pause_game_for_ad()
 		_interstitial_ad.show()
 		return true
 	else:
@@ -220,12 +257,14 @@ func _load_rewarded() -> void:
 		_rewarded_content_cb.on_ad_dismissed_full_screen_content = func():
 			print("[AdManager] Rewarded Ad full screen dismissed.")
 			_rewarded_ad = null
+			_resume_game_from_ad()
 			_load_rewarded()
 
 		_rewarded_content_cb.on_ad_failed_to_show_full_screen_content = func(err):
 			var err_str: String = str(err.message if "message" in err else err)
 			print("[AdManager] Rewarded Ad failed to show: ", err_str)
 			_rewarded_ad = null
+			_resume_game_from_ad()
 			rewarded_ad_failed.emit(err_str)
 			_load_rewarded()
 
@@ -250,28 +289,34 @@ func _load_rewarded() -> void:
 ## Calls the provided on_reward_earned callback when user finishes watching.
 func show_rewarded(on_reward_earned: Callable = Callable()) -> bool:
 	_pending_reward_callback = on_reward_earned
+	_pause_game_for_ad()
 
 	if not _plugin_available:
-		print("[AdManager-Mock] show_rewarded() called in desktop mode. Simulating reward after 0.5s...")
+		print("[AdManager-Mock] show_rewarded() called in desktop mode. Simulating reward after 0.8s...")
 		if is_instance_valid(instance):
 			var tw := instance.create_tween()
-			tw.tween_interval(0.5)
+			tw.tween_interval(0.8)
 			tw.tween_callback(func():
-				_grant_reward(50, "coins")
+				_resume_game_from_ad()
+				_grant_reward(10, "coins")
 			)
+		else:
+			_resume_game_from_ad()
+			_grant_reward(10, "coins")
 		return true
 
 	if _rewarded_ad != null:
 		print("[AdManager] Showing Rewarded Video Ad...")
 		_reward_listener = OnUserEarnedRewardListener.new()
 		_reward_listener.on_user_earned_reward = func(reward_item):
-			var amt: int = reward_item.amount if reward_item else 50
+			var amt: int = reward_item.amount if reward_item else 10
 			var type: String = reward_item.type if reward_item else "coins"
 			_grant_reward(amt, type)
 
 		_rewarded_ad.show(_reward_listener)
 		return true
 	else:
+		_resume_game_from_ad()
 		print("[AdManager] Rewarded Ad not ready yet. Preloading...")
 		rewarded_ad_failed.emit("Rewarded ad is loading, please try again in a few seconds!")
 		if is_initialized:
@@ -292,7 +337,7 @@ func is_rewarded_ready() -> bool:
 	return _rewarded_ad != null
 
 # ==============================================================================
-# 4. REMOVE ADS (IAP INTEGRATION)
+# 4. REMOVE ADS (IAP INTEGRATION - $4.99)
 # ==============================================================================
 
 func remove_all_ads() -> void:
@@ -302,4 +347,4 @@ func remove_all_ads() -> void:
 		_banner_view.destroy()
 		_banner_view = null
 	_interstitial_ad = null
-	print("[AdManager] All ads removed permanently.")
+	print("[AdManager] Banner & Interstitial ads removed permanently ($4.99). Rewarded ads remain active.")

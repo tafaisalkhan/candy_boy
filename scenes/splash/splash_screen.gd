@@ -1,7 +1,8 @@
 extends Control
 
 const GAME_SCENE := "res://scenes/main.tscn"
-const SPLASH_BACKGROUND := "res://assets/ui/game_icon.png"
+const SPLASH_BACKGROUND_PORTRAIT := "res://assets/ui/boy_candy_splash_bg.png"
+const SPLASH_BACKGROUND_ICON := "res://assets/ui/game_icon.png"
 
 var play_button: Button = null
 var settings_button: Button = null
@@ -19,8 +20,9 @@ var is_loading_complete: bool = false
 
 
 func _ready() -> void:
+	var bg_path := SPLASH_BACKGROUND_PORTRAIT if FileAccess.file_exists(ProjectSettings.globalize_path(SPLASH_BACKGROUND_PORTRAIT)) else SPLASH_BACKGROUND_ICON
 	var background := TextureRect.new()
-	background.texture = _load_ui_texture(SPLASH_BACKGROUND)
+	background.texture = _load_ui_texture(bg_path)
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
@@ -34,14 +36,14 @@ func _ready() -> void:
 	var title_shadow := Label.new()
 	title_shadow.text = "BOY FAVORITE\nCOLLECTION"
 	title_shadow.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	title_shadow.offset_left = 22.0
-	title_shadow.offset_right = -22.0
+	title_shadow.offset_left = 30.0
+	title_shadow.offset_right = -30.0
 	title_shadow.offset_top = 55.0
 	title_shadow.offset_bottom = 270.0
 	title_shadow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title_shadow.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	title_shadow.add_theme_font_override("font", title_font)
-	title_shadow.add_theme_font_size_override("font_size", 68)
+	title_shadow.add_theme_font_size_override("font_size", 64)
 	title_shadow.add_theme_color_override("font_color", Color("#5123aa"))
 	title_shadow.add_theme_color_override("font_outline_color", Color("#5123aa"))
 	title_shadow.add_theme_constant_override("outline_size", 20)
@@ -51,14 +53,14 @@ func _ready() -> void:
 	var title := Label.new()
 	title.text = "BOY FAVORITE\nCOLLECTION"
 	title.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	title.offset_left = 22.0
-	title.offset_right = -22.0
+	title.offset_left = 30.0
+	title.offset_right = -30.0
 	title.offset_top = 42.0
 	title.offset_bottom = 252.0
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	title.add_theme_font_override("font", title_font)
-	title.add_theme_font_size_override("font_size", 68)
+	title.add_theme_font_size_override("font_size", 64)
 	title.add_theme_color_override("font_color", Color("#ffb900"))
 	title.add_theme_color_override("font_outline_color", Color.WHITE)
 	title.add_theme_constant_override("outline_size", 12)
@@ -109,11 +111,11 @@ func _ready() -> void:
 
 	for arg in all_args:
 		if arg.begins_with("--test") or arg == "--play" or arg.begins_with("--level"):
-			call_deferred("_start_game")
+			call_deferred("_start_game", true)
 			return
 
-	if FileAccess.file_exists("res://test_loop.flag") or FileAccess.file_exists("res://test_powerup.flag") or FileAccess.file_exists("res://test_screenshot.flag") or FileAccess.file_exists("res://test_cupboard.flag") or FileAccess.file_exists("res://test_victory.flag") or FileAccess.file_exists("res://test_fail.flag"):
-		call_deferred("_start_game")
+	if FileAccess.file_exists("res://test_loop.flag") or FileAccess.file_exists("res://test_powerup.flag") or FileAccess.file_exists("res://test_screenshot.flag") or FileAccess.file_exists("res://test_cupboard.flag") or FileAccess.file_exists("res://test_victory.flag") or FileAccess.file_exists("res://test_fail.flag") or FileAccess.file_exists("res://test_rewarded_powerup.flag"):
+		call_deferred("_start_game", true)
 		return
 
 	if "--screen-game" in all_args:
@@ -132,8 +134,8 @@ func _build_loader_ui(p_font: Font) -> void:
 	loader_container = VBoxContainer.new()
 	loader_container.name = "LoaderContainer"
 	loader_container.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	loader_container.offset_left = 120.0
-	loader_container.offset_right = -120.0
+	loader_container.offset_left = 140.0
+	loader_container.offset_right = -140.0
 	loader_container.offset_top = -200.0
 	loader_container.offset_bottom = -75.0
 	loader_container.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -184,8 +186,8 @@ func _build_action_buttons_ui(p_font: Font) -> void:
 	button_container = VBoxContainer.new()
 	button_container.name = "ButtonContainer"
 	button_container.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	button_container.offset_left = 110.0
-	button_container.offset_right = -110.0
+	button_container.offset_left = 130.0
+	button_container.offset_right = -130.0
 	button_container.offset_top = -240.0
 	button_container.offset_bottom = -45.0
 	button_container.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -314,8 +316,14 @@ func _capture_privacy_and_quit() -> void:
 	get_tree().quit()
 
 
-func _start_game() -> void:
-	if GameManager != null and not GameManager.is_privacy_policy_accepted:
+func _start_game(force_start: bool = false) -> void:
+	var all_args := OS.get_cmdline_user_args() + OS.get_cmdline_args()
+	var is_test_run := force_start
+	for a in all_args:
+		if a.begins_with("--test-") or a == "--play" or a.begins_with("--level"):
+			is_test_run = true
+			break
+	if not is_test_run and GameManager != null and not GameManager.is_privacy_policy_accepted:
 		_show_privacy_policy_popup()
 		return
 	print("SPLASH: starting game...")

@@ -38,22 +38,22 @@ func _build_ui() -> void:
 	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(backdrop)
 
-	# 2. Main Dialog Card (780x880 matching Level Complete popup)
+	# 2. Main Dialog Card - Increased side space (640px width for generous 130px side margins)
 	var card := PanelContainer.new()
 	card.name = "PrivacyCard"
-	card.custom_minimum_size = Vector2(780, 880)
+	card.custom_minimum_size = Vector2(640, 880)
 	card.set_anchors_preset(Control.PRESET_CENTER)
-	card.pivot_offset = Vector2(390, 440)
-	card.offset_left = -390
+	card.pivot_offset = Vector2(320, 440)
+	card.offset_left = -320
 	card.offset_top = -440
-	card.offset_right = 390
+	card.offset_right = 320
 	card.offset_bottom = 440
 
 	var card_style := StyleBoxFlat.new()
 	card_style.bg_color = Color("#15212d")
-	card_style.set_corner_radius_all(34)
+	card_style.set_corner_radius_all(32)
 	card_style.border_color = Color("#f1c40f")
-	card_style.set_border_width_all(8)
+	card_style.set_border_width_all(7)
 	card_style.shadow_color = Color(0, 0, 0, 0.75)
 	card_style.shadow_size = 35
 	card.add_theme_stylebox_override("panel", card_style)
@@ -61,13 +61,13 @@ func _build_ui() -> void:
 
 	var v_box := VBoxContainer.new()
 	v_box.alignment = BoxContainer.ALIGNMENT_CENTER
-	v_box.add_theme_constant_override("separation", 14)
+	v_box.add_theme_constant_override("separation", 12)
 	card.add_child(v_box)
 
 	# 3D Golden Curved Ribbon Banner
 	var banner_box := Panel.new()
-	banner_box.custom_minimum_size = Vector2(580, 88)
-	banner_box.size = Vector2(580, 88)
+	banner_box.custom_minimum_size = Vector2(500, 80)
+	banner_box.size = Vector2(500, 80)
 	var b_trans := StyleBoxEmpty.new()
 	banner_box.add_theme_stylebox_override("panel", b_trans)
 	v_box.add_child(banner_box)
@@ -87,25 +87,25 @@ func _build_ui() -> void:
 	title_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	if game_title_font != null:
 		title_lbl.add_theme_font_override("font", game_title_font)
-	title_lbl.add_theme_font_size_override("font_size", 40)
+	title_lbl.add_theme_font_size_override("font_size", 34)
 	title_lbl.add_theme_color_override("font_color", Color.WHITE)
 	title_lbl.add_theme_color_override("font_outline_color", Color("#7f5809"))
-	title_lbl.add_theme_constant_override("outline_size", 12)
+	title_lbl.add_theme_constant_override("outline_size", 10)
 	banner_box.add_child(title_lbl)
 
 	# 3D Security Shield Centerpiece Icon
 	var shield_rect := TextureRect.new()
 	shield_rect.texture = _load_texture("res://assets/ui/icon_3d_privacy.svg")
-	shield_rect.custom_minimum_size = Vector2(100, 100)
-	shield_rect.size = Vector2(100, 100)
+	shield_rect.custom_minimum_size = Vector2(90, 90)
+	shield_rect.size = Vector2(90, 90)
 	shield_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	shield_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	shield_rect.pivot_offset = Vector2(50, 50)
+	shield_rect.pivot_offset = Vector2(45, 45)
 	shield_rect.scale = Vector2.ZERO
 	v_box.add_child(shield_rect)
 
 	var s_tw := create_tween()
-	s_tw.tween_property(shield_rect, "scale", Vector2(1.2, 1.2), 0.28).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	s_tw.tween_property(shield_rect, "scale", Vector2(1.15, 1.15), 0.28).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	s_tw.tween_property(shield_rect, "scale", Vector2.ONE, 0.15)
 
 	var sub_lbl := Label.new()
@@ -113,33 +113,33 @@ func _build_ui() -> void:
 	sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	if game_body_font != null:
 		sub_lbl.add_theme_font_override("font", game_body_font)
-	sub_lbl.add_theme_font_size_override("font_size", 22)
+	sub_lbl.add_theme_font_size_override("font_size", 19)
 	sub_lbl.add_theme_color_override("font_color", Color("#00cec9"))
 	sub_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
-	sub_lbl.add_theme_constant_override("outline_size", 8)
+	sub_lbl.add_theme_constant_override("outline_size", 7)
 	v_box.add_child(sub_lbl)
 
-	# Privacy Terms Box Container
+	# Privacy Terms Box Container - Cleanly proportioned inside 640px card
 	var terms_box := PanelContainer.new()
-	terms_box.custom_minimum_size = Vector2(680, 410)
+	terms_box.custom_minimum_size = Vector2(580, 420)
 	var t_style := StyleBoxFlat.new()
 	t_style.bg_color = Color(0.08, 0.12, 0.18, 0.95)
 	t_style.border_color = Color("#34495e")
 	t_style.set_border_width_all(3)
-	t_style.set_corner_radius_all(20)
+	t_style.set_corner_radius_all(18)
 	terms_box.add_theme_stylebox_override("panel", t_style)
 	v_box.add_child(terms_box)
 
 	var terms_margin := MarginContainer.new()
-	terms_margin.add_theme_constant_override("margin_left", 24)
-	terms_margin.add_theme_constant_override("margin_top", 18)
-	terms_margin.add_theme_constant_override("margin_right", 24)
-	terms_margin.add_theme_constant_override("margin_bottom", 18)
+	terms_margin.add_theme_constant_override("margin_left", 20)
+	terms_margin.add_theme_constant_override("margin_top", 16)
+	terms_margin.add_theme_constant_override("margin_right", 20)
+	terms_margin.add_theme_constant_override("margin_bottom", 16)
 	terms_box.add_child(terms_margin)
 
 	var terms_vbox := VBoxContainer.new()
 	terms_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	terms_vbox.add_theme_constant_override("separation", 14)
+	terms_vbox.add_theme_constant_override("separation", 12)
 	terms_margin.add_child(terms_vbox)
 
 	_add_term_bullet(terms_vbox, "🛡️ COPPA & CHILD SAFE", "We never collect personal identity details or contact info. Suitable for all ages.")
@@ -150,7 +150,7 @@ func _build_ui() -> void:
 	# Tactile 3D Accept Button
 	var accept_btn := Button.new()
 	accept_btn.text = "ACCEPT & CONTINUE ➔"
-	accept_btn.custom_minimum_size = Vector2(580, 92)
+	accept_btn.custom_minimum_size = Vector2(520, 88)
 	var btn_style := StyleBoxFlat.new()
 	btn_style.bg_color = Color("#2ecc71")
 	btn_style.border_color = Color("#1e824c")
@@ -158,7 +158,7 @@ func _build_ui() -> void:
 	btn_style.border_width_left = 3
 	btn_style.border_width_right = 3
 	btn_style.border_width_top = 2
-	btn_style.set_corner_radius_all(28)
+	btn_style.set_corner_radius_all(26)
 	btn_style.shadow_color = Color(0, 0, 0, 0.4)
 	btn_style.shadow_size = 8
 
@@ -175,10 +175,10 @@ func _build_ui() -> void:
 	accept_btn.add_theme_stylebox_override("pressed", btn_press)
 	if game_title_font != null:
 		accept_btn.add_theme_font_override("font", game_title_font)
-	accept_btn.add_theme_font_size_override("font_size", 34)
+	accept_btn.add_theme_font_size_override("font_size", 30)
 	accept_btn.add_theme_color_override("font_color", Color.WHITE)
 	accept_btn.add_theme_color_override("font_outline_color", Color("#1b4d3e"))
-	accept_btn.add_theme_constant_override("outline_size", 9)
+	accept_btn.add_theme_constant_override("outline_size", 8)
 	accept_btn.pressed.connect(_on_accept_pressed)
 	v_box.add_child(accept_btn)
 

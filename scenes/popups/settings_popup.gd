@@ -8,8 +8,10 @@ var game_title_font: Font = null
 var game_body_font: Font = null
 var sfx_btn: Button = null
 var music_btn: Button = null
+var remove_ads_btn: Button = null
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	_init_fonts()
 	_build_ui()
 
@@ -40,16 +42,16 @@ func _build_ui() -> void:
 	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(backdrop)
 
-	# 2. Main Dialog Card
+	# 2. Main Dialog Card (640 width for generous 130px side margins)
 	var card := PanelContainer.new()
 	card.name = "SettingsCard"
-	card.custom_minimum_size = Vector2(720, 680)
+	card.custom_minimum_size = Vector2(640, 780)
 	card.set_anchors_preset(Control.PRESET_CENTER)
-	card.pivot_offset = Vector2(360, 340)
-	card.offset_left = -360
-	card.offset_top = -340
-	card.offset_right = 360
-	card.offset_bottom = 340
+	card.pivot_offset = Vector2(320, 390)
+	card.offset_left = -320
+	card.offset_top = -390
+	card.offset_right = 320
+	card.offset_bottom = 390
 
 	var card_style := StyleBoxFlat.new()
 	card_style.bg_color = Color("#1e272e")
@@ -65,15 +67,15 @@ func _build_ui() -> void:
 	add_child(card)
 
 	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 36)
-	margin.add_theme_constant_override("margin_right", 36)
-	margin.add_theme_constant_override("margin_top", 32)
-	margin.add_theme_constant_override("margin_bottom", 32)
+	margin.add_theme_constant_override("margin_left", 28)
+	margin.add_theme_constant_override("margin_right", 28)
+	margin.add_theme_constant_override("margin_top", 28)
+	margin.add_theme_constant_override("margin_bottom", 28)
 	card.add_child(margin)
 
 	var v_box := VBoxContainer.new()
 	v_box.alignment = BoxContainer.ALIGNMENT_CENTER
-	v_box.add_theme_constant_override("separation", 22)
+	v_box.add_theme_constant_override("separation", 18)
 	margin.add_child(v_box)
 
 	# Title Banner
@@ -82,7 +84,7 @@ func _build_ui() -> void:
 	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	if game_title_font != null:
 		title_lbl.add_theme_font_override("font", game_title_font)
-	title_lbl.add_theme_font_size_override("font_size", 42)
+	title_lbl.add_theme_font_size_override("font_size", 40)
 	title_lbl.add_theme_color_override("font_color", Color("#00cec9"))
 	title_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
 	title_lbl.add_theme_constant_override("outline_size", 10)
@@ -91,21 +93,28 @@ func _build_ui() -> void:
 	# Sound Effects (SFX) Button
 	sfx_btn = Button.new()
 	_update_sfx_button()
-	sfx_btn.custom_minimum_size = Vector2(560, 80)
+	sfx_btn.custom_minimum_size = Vector2(520, 78)
 	sfx_btn.pressed.connect(_toggle_sfx)
 	v_box.add_child(sfx_btn)
 
 	# Background Music (BGM) Button
 	music_btn = Button.new()
 	_update_music_button()
-	music_btn.custom_minimum_size = Vector2(560, 80)
+	music_btn.custom_minimum_size = Vector2(520, 78)
 	music_btn.pressed.connect(_toggle_music)
 	v_box.add_child(music_btn)
+
+	# Remove Ads ($4.99) Button
+	remove_ads_btn = Button.new()
+	_update_remove_ads_button()
+	remove_ads_btn.custom_minimum_size = Vector2(520, 78)
+	remove_ads_btn.pressed.connect(_on_remove_ads_pressed)
+	v_box.add_child(remove_ads_btn)
 
 	# Privacy Policy Button
 	var privacy_btn := Button.new()
 	privacy_btn.text = "📜 PRIVACY POLICY"
-	privacy_btn.custom_minimum_size = Vector2(560, 80)
+	privacy_btn.custom_minimum_size = Vector2(520, 74)
 	_apply_btn_style(privacy_btn, Color("#34495e"), Color("#2c3e50"), Color("#4b6584"))
 	privacy_btn.pressed.connect(func():
 		privacy_policy_requested.emit()
@@ -115,7 +124,7 @@ func _build_ui() -> void:
 	# Close Button
 	var close_btn := Button.new()
 	close_btn.text = "✖ CLOSE"
-	close_btn.custom_minimum_size = Vector2(560, 88)
+	close_btn.custom_minimum_size = Vector2(520, 82)
 	_apply_btn_style(close_btn, Color("#e74c3c"), Color("#c0392b"), Color("#ff6b6b"))
 	close_btn.pressed.connect(func():
 		if SoundManager != null:
@@ -138,16 +147,47 @@ func _build_ui() -> void:
 	pop_tw.parallel().tween_property(card, "modulate:a", 1.0, 0.25)
 
 func _toggle_sfx() -> void:
+	var new_sfx := not (SoundManager.sfx_enabled if SoundManager != null else true)
 	if SoundManager != null:
-		SoundManager.set_sfx_enabled(not SoundManager.sfx_enabled)
+		SoundManager.set_sfx_enabled(new_sfx)
 		SoundManager.play_sfx("button")
+	if GameManager != null:
+		GameManager.set_audio_settings(SoundManager.music_enabled if SoundManager != null else true, new_sfx)
 	_update_sfx_button()
 
 func _toggle_music() -> void:
+	var new_music := not (SoundManager.music_enabled if SoundManager != null else true)
 	if SoundManager != null:
-		SoundManager.set_music_enabled(not SoundManager.music_enabled)
+		SoundManager.set_music_enabled(new_music)
 		SoundManager.play_sfx("button")
+	if GameManager != null:
+		GameManager.set_audio_settings(new_music, SoundManager.sfx_enabled if SoundManager != null else true)
 	_update_music_button()
+
+func _on_remove_ads_pressed() -> void:
+	if GameManager != null and GameManager.is_ads_removed:
+		return
+	if GameManager != null:
+		GameManager.set_ads_removed(true)
+	var ad_mgr = get_tree().root.get_node_or_null("AdManager")
+	if ad_mgr != null and ad_mgr.has_method("remove_all_ads"):
+		ad_mgr.remove_all_ads()
+	if SoundManager != null:
+		SoundManager.play_sfx("coin_sound")
+	_update_remove_ads_button()
+
+func _update_remove_ads_button() -> void:
+	if not is_instance_valid(remove_ads_btn):
+		return
+	var is_removed := GameManager.is_ads_removed if GameManager != null else false
+	if is_removed:
+		remove_ads_btn.text = "✅ ADS REMOVED"
+		remove_ads_btn.disabled = true
+		_apply_btn_style(remove_ads_btn, Color("#27ae60"), Color("#1e824c"), Color("#2ecc71"))
+	else:
+		remove_ads_btn.text = "🚫 REMOVE ADS ($4.99)"
+		remove_ads_btn.disabled = false
+		_apply_btn_style(remove_ads_btn, Color("#e67e22"), Color("#d35400"), Color("#f39c12"))
 
 func _update_sfx_button() -> void:
 	if not is_instance_valid(sfx_btn):
@@ -194,7 +234,7 @@ func _apply_btn_style(btn: Button, bg_col: Color, border_col: Color, hover_col: 
 	btn.add_theme_stylebox_override("pressed", p_style)
 	if game_title_font != null:
 		btn.add_theme_font_override("font", game_title_font)
-	btn.add_theme_font_size_override("font_size", 28)
+	btn.add_theme_font_size_override("font_size", 26)
 	btn.add_theme_color_override("font_color", Color.WHITE)
 	btn.add_theme_color_override("font_outline_color", Color.BLACK)
 	btn.add_theme_constant_override("outline_size", 6)

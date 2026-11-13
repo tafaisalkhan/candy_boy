@@ -11,6 +11,9 @@ var current_level: int = 1
 var highest_unlocked_level: int = 1
 var coins: int = 1577
 var is_privacy_policy_accepted: bool = false
+var is_ads_removed: bool = false
+var music_enabled: bool = true
+var sfx_enabled: bool = true
 var state: GameState = null
 var ad_manager: Node = null
 
@@ -31,6 +34,8 @@ func _init_ad_manager() -> void:
 			ad_manager = ad_mgr_script.new()
 			ad_manager.name = "AdManager"
 			get_tree().root.add_child.call_deferred(ad_manager)
+			if is_ads_removed and ad_manager.has_method("remove_all_ads"):
+				ad_manager.call_deferred("remove_all_ads")
 
 
 func get_powerup_unlock_level(powerup_type: String) -> int:
@@ -87,6 +92,23 @@ func set_privacy_policy_accepted(accepted: bool = true) -> void:
 	save_game_state()
 
 
+func set_ads_removed(removed: bool = true) -> void:
+	is_ads_removed = removed
+	save_game_state()
+	var ad_mgr = get_tree().root.get_node_or_null("AdManager")
+	if ad_mgr != null and ad_mgr.has_method("remove_all_ads"):
+		ad_mgr.remove_all_ads()
+
+
+func set_audio_settings(p_music: bool, p_sfx: bool) -> void:
+	music_enabled = p_music
+	sfx_enabled = p_sfx
+	save_game_state()
+	if SoundManager != null:
+		SoundManager.set_music_enabled(music_enabled)
+		SoundManager.set_sfx_enabled(sfx_enabled)
+
+
 func save_game_state() -> void:
 	if state != null:
 		state.current_level = current_level
@@ -98,6 +120,9 @@ func save_game_state() -> void:
 	cfg.set_value("progress", "highest_unlocked_level", highest_unlocked_level)
 	cfg.set_value("economy", "coins", coins)
 	cfg.set_value("settings", "privacy_policy_accepted", is_privacy_policy_accepted)
+	cfg.set_value("settings", "is_ads_removed", is_ads_removed)
+	cfg.set_value("settings", "music_enabled", music_enabled)
+	cfg.set_value("settings", "sfx_enabled", sfx_enabled)
 	cfg.save(SAVE_PATH)
 
 
@@ -108,8 +133,14 @@ func load_game_state() -> void:
 		coins = int(cfg.get_value("economy", "coins", 1577))
 		current_level = int(cfg.get_value("progress", "current_level", 1))
 		is_privacy_policy_accepted = bool(cfg.get_value("settings", "privacy_policy_accepted", false))
+		is_ads_removed = bool(cfg.get_value("settings", "is_ads_removed", false))
+		music_enabled = bool(cfg.get_value("settings", "music_enabled", true))
+		sfx_enabled = bool(cfg.get_value("settings", "sfx_enabled", true))
 	if state != null:
 		state.current_level = current_level
 		state.highest_unlocked_level = highest_unlocked_level
 		state.coins = coins
 		state.is_privacy_policy_accepted = is_privacy_policy_accepted
+	if SoundManager != null:
+		SoundManager.set_music_enabled(music_enabled)
+		SoundManager.set_sfx_enabled(sfx_enabled)

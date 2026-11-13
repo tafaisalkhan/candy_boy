@@ -24,6 +24,7 @@ func set_sfx_enabled(val: bool) -> void:
 	sfx_enabled = val
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	for i in POOL_SIZE:
 		add_player_3d()
 		add_player_2d()
@@ -129,7 +130,7 @@ func get_available_2d() -> AudioStreamPlayer:
 	return add_player_2d()
 
 func play_3d(stream: AudioStream, pos: Vector3) -> void:
-	if stream == null:
+	if not sfx_enabled or stream == null:
 		return
 	var player := get_available_3d()
 	player.stream = stream
@@ -137,7 +138,7 @@ func play_3d(stream: AudioStream, pos: Vector3) -> void:
 	player.play()
 
 func _play_stream_2d(stream: AudioStream, pitch: float = 1.0, vol_db: float = 0.0) -> void:
-	if stream == null:
+	if not sfx_enabled or stream == null:
 		return
 	var player := get_available_2d()
 	player.stream = stream

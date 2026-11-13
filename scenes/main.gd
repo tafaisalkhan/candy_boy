@@ -190,6 +190,10 @@ func _ready() -> void:
 		_test_cupboard_opening()
 	elif "--view-room1" in all_args:
 		_test_view_room1()
+	elif "--test-rewarded-powerup" in all_args or FileAccess.file_exists("res://test_rewarded_powerup.flag"):
+		if FileAccess.file_exists("res://test_rewarded_powerup.flag"):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path("res://test_rewarded_powerup.flag"))
+		_test_rewarded_powerup_prompt()
 	elif "--test-touch" in all_args:
 		_test_mobile_touch_movement()
 	elif GameManager != null and not GameManager.is_privacy_policy_accepted:
@@ -246,6 +250,25 @@ func _test_view_room1() -> void:
 			var path := ProjectSettings.globalize_path("res://screenshot_room1_view.png")
 			img.save_png(path)
 			print("ROOM1_VIEW_SCREENSHOT_SAVED")
+	get_tree().quit()
+
+func _test_rewarded_powerup_prompt() -> void:
+	await get_tree().create_timer(0.4).timeout
+	# Temporarily set coins to 0 to simulate player having no coins
+	if GameManager != null:
+		GameManager.coins = 0
+	coins = 0
+	if is_instance_valid(coin_lbl):
+		coin_lbl.text = " 0"
+	_activate_speed_powerup()
+	await get_tree().create_timer(0.5, true, false, true).timeout
+	var vp := get_viewport()
+	if vp:
+		var img := vp.get_texture().get_image()
+		if img:
+			var path := ProjectSettings.globalize_path("res://screenshot_rewarded_powerup_prompt.png")
+			img.save_png(path)
+			print("REWARDED_POWERUP_PROMPT_SCREENSHOT_SAVED")
 	get_tree().quit()
 
 func _test_cupboard_opening() -> void:
@@ -1264,11 +1287,11 @@ func _build_item_cupboard(item_dict: Dictionary, parent: Node3D) -> void:
 	prompt.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	if game_title_font != null:
 		prompt.font = game_title_font
-	prompt.font_size = 40
-	prompt.outline_size = 14
+	prompt.font_size = 52
+	prompt.outline_size = 16
 	prompt.outline_modulate = Color.BLACK
 	prompt.modulate = Color("#ff7675") if req_key else Color("#ffeaa7")
-	prompt.position = Vector3(0.0, cup_h + 1.55, 0.55)
+	prompt.position = Vector3(0.0, cup_h + 1.60, 0.55)
 	prompt.visible = false
 	c_root.add_child(prompt)
 
@@ -2069,20 +2092,20 @@ func _setup_hud() -> void:
 	lvl_lbl.add_theme_constant_override("outline_size", 9)
 	hud_root.add_child(lvl_lbl)
 
-	# Objective Sub-Label
+	# Objective Sub-Label (Large, High-Contrast & Clearly Visible)
 	var obj_lbl := Label.new()
 	obj_lbl.name = "ObjectiveLabel"
 	obj_lbl.text = "SNEAK IN & GET THE CANDY!"
 	obj_lbl.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	obj_lbl.offset_top = 82.0
-	obj_lbl.offset_bottom = 110.0
+	obj_lbl.offset_top = 80.0
+	obj_lbl.offset_bottom = 118.0
 	obj_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	if game_title_font != null:
 		obj_lbl.add_theme_font_override("font", game_title_font)
-	obj_lbl.add_theme_font_size_override("font_size", 15)
+	obj_lbl.add_theme_font_size_override("font_size", 22)
 	obj_lbl.add_theme_color_override("font_color", Color("#ffeaa7"))
-	obj_lbl.add_theme_color_override("font_outline_color", Color("#2d3436"))
-	obj_lbl.add_theme_constant_override("outline_size", 5)
+	obj_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	obj_lbl.add_theme_constant_override("outline_size", 8)
 	hud_root.add_child(obj_lbl)
 
 	# 2. Coin Pill Badge at Top Right (Compact & Consistent)
@@ -2120,35 +2143,35 @@ func _setup_hud() -> void:
 	coin_lbl.add_theme_color_override("font_color", Color("#2d3436"))
 	coin_box.add_child(coin_lbl)
 
-	# 4. Item Collector Widget at Top Left (Compact & Consistent)
+	# 4. Item Collector Widget at Top Left (Large, High-Contrast & Clearly Visible)
 	item_collector_panel = PanelContainer.new()
 	item_collector_panel.name = "ItemCollectorPanel"
 	item_collector_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	item_collector_panel.offset_left = 25.0
 	item_collector_panel.offset_top = 22.0
-	item_collector_panel.offset_right = 210.0
-	item_collector_panel.offset_bottom = 90.0
+	item_collector_panel.offset_right = 300.0
+	item_collector_panel.offset_bottom = 120.0
 
 	var ic_style := StyleBoxFlat.new()
-	ic_style.bg_color = Color(0.12, 0.16, 0.24, 0.92)
-	ic_style.set_corner_radius_all(16)
-	ic_style.border_color = Color("#0984e3")
-	ic_style.set_border_width_all(2)
-	ic_style.shadow_color = Color(0.0, 0.0, 0.0, 0.25)
-	ic_style.shadow_size = 5
+	ic_style.bg_color = Color(0.10, 0.14, 0.22, 0.94)
+	ic_style.set_corner_radius_all(20)
+	ic_style.border_color = Color("#00cec9")
+	ic_style.set_border_width_all(3)
+	ic_style.shadow_color = Color(0.0, 0.0, 0.0, 0.35)
+	ic_style.shadow_size = 8
 	item_collector_panel.add_theme_stylebox_override("panel", ic_style)
 	hud_root.add_child(item_collector_panel)
 
 	var ic_margin := MarginContainer.new()
-	ic_margin.add_theme_constant_override("margin_left", 10)
-	ic_margin.add_theme_constant_override("margin_top", 6)
-	ic_margin.add_theme_constant_override("margin_right", 10)
-	ic_margin.add_theme_constant_override("margin_bottom", 6)
+	ic_margin.add_theme_constant_override("margin_left", 14)
+	ic_margin.add_theme_constant_override("margin_top", 10)
+	ic_margin.add_theme_constant_override("margin_right", 14)
+	ic_margin.add_theme_constant_override("margin_bottom", 10)
 	item_collector_panel.add_child(ic_margin)
 
 	var ic_vbox := VBoxContainer.new()
 	ic_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	ic_vbox.add_theme_constant_override("separation", 4)
+	ic_vbox.add_theme_constant_override("separation", 8)
 	ic_margin.add_child(ic_vbox)
 
 	item_collector_label = Label.new()
@@ -2156,16 +2179,16 @@ func _setup_hud() -> void:
 	item_collector_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	if game_title_font != null:
 		item_collector_label.add_theme_font_override("font", game_title_font)
-	item_collector_label.add_theme_font_size_override("font_size", 13)
+	item_collector_label.add_theme_font_size_override("font_size", 22)
 	item_collector_label.add_theme_color_override("font_color", Color("#ffeaa7"))
-	item_collector_label.add_theme_color_override("font_outline_color", Color("#2d3436"))
-	item_collector_label.add_theme_constant_override("outline_size", 4)
+	item_collector_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	item_collector_label.add_theme_constant_override("outline_size", 8)
 	ic_vbox.add_child(item_collector_label)
 
 	var ic_slots_hbox := HBoxContainer.new()
 	ic_slots_hbox.name = "SlotsHBox"
 	ic_slots_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	ic_slots_hbox.add_theme_constant_override("separation", 8)
+	ic_slots_hbox.add_theme_constant_override("separation", 10)
 	ic_vbox.add_child(ic_slots_hbox)
 
 	# 3. Bottom Powerup Tray (Consistent, Proportionate Dock)
@@ -2368,13 +2391,13 @@ func _populate_item_collector_hud() -> void:
 		var it: Dictionary = target_items[i]
 		var slot := Panel.new()
 		slot.name = "Slot_%s" % it["id"]
-		slot.custom_minimum_size = Vector2(36, 36)
+		slot.custom_minimum_size = Vector2(48, 48)
 
 		var s_style := StyleBoxFlat.new()
 		s_style.bg_color = Color("#2d3436")
-		s_style.set_corner_radius_all(10)
-		s_style.border_color = Color("#636e72")
-		s_style.set_border_width_all(2)
+		s_style.set_corner_radius_all(12)
+		s_style.border_color = Color("#74b9ff")
+		s_style.set_border_width_all(3)
 		slot.add_theme_stylebox_override("panel", s_style)
 		slots_hbox.add_child(slot)
 		item_slot_panels.append(slot)
@@ -2384,22 +2407,22 @@ func _populate_item_collector_hud() -> void:
 		icon_lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
 		icon_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		icon_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		icon_lbl.add_theme_font_size_override("font_size", 18)
+		icon_lbl.add_theme_font_size_override("font_size", 26)
 		slot.add_child(icon_lbl)
 
 		# Checkmark Badge in top-right of slot
 		var check_badge := Label.new()
 		check_badge.text = "✓"
 		check_badge.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-		check_badge.offset_left = -16.0
+		check_badge.offset_left = -22.0
 		check_badge.offset_top = 2.0
 		check_badge.offset_right = -2.0
-		check_badge.offset_bottom = 18.0
+		check_badge.offset_bottom = 24.0
 		check_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		check_badge.add_theme_font_size_override("font_size", 14)
+		check_badge.add_theme_font_size_override("font_size", 20)
 		check_badge.add_theme_color_override("font_color", Color("#2ecc71"))
 		check_badge.add_theme_color_override("font_outline_color", Color.BLACK)
-		check_badge.add_theme_constant_override("outline_size", 4)
+		check_badge.add_theme_constant_override("outline_size", 6)
 		check_badge.visible = false
 		slot.add_child(check_badge)
 		item_slot_badges.append(check_badge)
@@ -2411,6 +2434,7 @@ func _update_item_collector_hud(collected_id: String) -> void:
 			item_collector_label.add_theme_color_override("font_color", Color("#2ecc71"))
 		else:
 			item_collector_label.text = "🎒 ITEMS TO FIND: %d / %d" % [collected_items_count, target_items_total]
+			item_collector_label.add_theme_color_override("font_color", Color("#ffeaa7"))
 
 	for i in range(target_items.size()):
 		var it: Dictionary = target_items[i]
@@ -2518,19 +2542,17 @@ func _on_coins_changed(total: int) -> void:
 	if is_instance_valid(coin_lbl):
 		coin_lbl.text = " %d" % coins
 
-func _try_spend_powerup_coins() -> bool:
+func _has_enough_powerup_coins() -> bool:
+	var current_coins := GameManager.coins if GameManager != null else coins
+	return current_coins >= POWERUP_COIN_COST
+
+func _spend_powerup_coins() -> bool:
 	if GameManager != null:
 		if not GameManager.try_spend_coins(POWERUP_COIN_COST):
-			if SoundManager != null:
-				SoundManager.play_sfx("wrong")
-			_show_powerup_toast("NEED %d COINS FOR POWERUP!" % POWERUP_COIN_COST, Color("#e74c3c"))
 			return false
 		coins = GameManager.coins
 	else:
 		if coins < POWERUP_COIN_COST:
-			if SoundManager != null:
-				SoundManager.play_sfx("wrong")
-			_show_powerup_toast("NEED %d COINS FOR POWERUP!" % POWERUP_COIN_COST, Color("#e74c3c"))
 			return false
 		coins -= POWERUP_COIN_COST
 
@@ -2542,11 +2564,153 @@ func _try_spend_powerup_coins() -> bool:
 		p_tw.tween_property(coin_panel, "scale", Vector2.ONE, 0.1)
 	return true
 
+func _show_rewarded_powerup_dialog(powerup_title: String, on_success_activate: Callable) -> void:
+	if SoundManager != null:
+		SoundManager.play_sfx("wrong")
+
+	# Pause gameplay while prompt is showing
+	var was_paused := get_tree().paused
+	get_tree().paused = true
+
+	var dialog := PanelContainer.new()
+	dialog.name = "RewardedPowerupDialog"
+	dialog.process_mode = Node.PROCESS_MODE_ALWAYS
+	dialog.set_anchors_preset(Control.PRESET_CENTER)
+	dialog.custom_minimum_size = Vector2(620, 480)
+	dialog.pivot_offset = Vector2(310, 240)
+	dialog.offset_left = -310
+	dialog.offset_top = -240
+	dialog.offset_right = 310
+	dialog.offset_bottom = 240
+
+	var d_style := StyleBoxFlat.new()
+	d_style.bg_color = Color("#15212d")
+	d_style.border_color = Color("#f1c40f")
+	d_style.set_border_width_all(6)
+	d_style.set_corner_radius_all(28)
+	d_style.shadow_color = Color(0, 0, 0, 0.75)
+	d_style.shadow_size = 28
+	dialog.add_theme_stylebox_override("panel", d_style)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 24)
+	margin.add_theme_constant_override("margin_right", 24)
+	margin.add_theme_constant_override("margin_top", 24)
+	margin.add_theme_constant_override("margin_bottom", 24)
+	dialog.add_child(margin)
+
+	var v_box := VBoxContainer.new()
+	v_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	v_box.add_theme_constant_override("separation", 18)
+	margin.add_child(v_box)
+
+	var t_lbl := Label.new()
+	t_lbl.text = "🪙 NOT ENOUGH COINS!"
+	t_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	if game_title_font != null:
+		t_lbl.add_theme_font_override("font", game_title_font)
+	t_lbl.add_theme_font_size_override("font_size", 34)
+	t_lbl.add_theme_color_override("font_color", Color("#f1c40f"))
+	t_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	t_lbl.add_theme_constant_override("outline_size", 8)
+	v_box.add_child(t_lbl)
+
+	var desc_lbl := Label.new()
+	desc_lbl.text = "Powerups cost %d coins.\nWatch a short video ad to earn 10 Coins and activate %s!" % [POWERUP_COIN_COST, powerup_title]
+	desc_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if game_title_font != null:
+		desc_lbl.add_theme_font_override("font", game_title_font)
+	desc_lbl.add_theme_font_size_override("font_size", 22)
+	desc_lbl.add_theme_color_override("font_color", Color.WHITE)
+	desc_lbl.add_theme_color_override("font_outline_color", Color("#2c3e50"))
+	desc_lbl.add_theme_constant_override("outline_size", 6)
+	v_box.add_child(desc_lbl)
+
+	# Watch Ad Button
+	var watch_btn := Button.new()
+	watch_btn.text = "🎬 WATCH AD (+10 COINS)"
+	watch_btn.custom_minimum_size = Vector2(480, 80)
+	var wb_style := StyleBoxFlat.new()
+	wb_style.bg_color = Color("#2ecc71")
+	wb_style.border_color = Color("#1e824c")
+	wb_style.border_width_bottom = 6
+	wb_style.set_corner_radius_all(22)
+	watch_btn.add_theme_stylebox_override("normal", wb_style)
+	if game_title_font != null:
+		watch_btn.add_theme_font_override("font", game_title_font)
+	watch_btn.add_theme_font_size_override("font_size", 28)
+	watch_btn.add_theme_color_override("font_color", Color.WHITE)
+	watch_btn.add_theme_color_override("font_outline_color", Color("#1b4d3e"))
+	watch_btn.add_theme_constant_override("outline_size", 8)
+
+	# Cancel Button
+	var cancel_btn := Button.new()
+	cancel_btn.text = "✖ CANCEL"
+	cancel_btn.custom_minimum_size = Vector2(480, 68)
+	var cb_style := StyleBoxFlat.new()
+	cb_style.bg_color = Color("#7f8c8d")
+	cb_style.border_color = Color("#576574")
+	cb_style.border_width_bottom = 5
+	cb_style.set_corner_radius_all(20)
+	cancel_btn.add_theme_stylebox_override("normal", cb_style)
+	if game_title_font != null:
+		cancel_btn.add_theme_font_override("font", game_title_font)
+	cancel_btn.add_theme_font_size_override("font_size", 24)
+	cancel_btn.add_theme_color_override("font_color", Color.WHITE)
+	cancel_btn.add_theme_color_override("font_outline_color", Color.BLACK)
+	cancel_btn.add_theme_constant_override("outline_size", 6)
+
+	v_box.add_child(watch_btn)
+	v_box.add_child(cancel_btn)
+	hud_root.add_child(dialog)
+
+	cancel_btn.pressed.connect(func():
+		get_tree().paused = was_paused
+		dialog.queue_free()
+	)
+
+	watch_btn.pressed.connect(func():
+		dialog.queue_free()
+		var ad_mgr = get_tree().root.get_node_or_null("AdManager")
+		if ad_mgr != null and ad_mgr.has_method("show_rewarded"):
+			ad_mgr.show_rewarded(func(amount: int, _type: String):
+				get_tree().paused = was_paused
+				if GameManager != null:
+					GameManager.add_coins(amount)
+					coins = GameManager.coins
+				else:
+					coins += amount
+				if is_instance_valid(coin_lbl):
+					coin_lbl.text = " %d" % coins
+				_show_powerup_toast("🎉 +%d COINS! %s ACTIVATED!" % [amount, powerup_title], Color("#2ecc71"))
+				if on_success_activate.is_valid():
+					on_success_activate.call()
+			)
+		else:
+			get_tree().paused = was_paused
+			if GameManager != null:
+				GameManager.add_coins(10)
+				coins = GameManager.coins
+			else:
+				coins += 10
+			if is_instance_valid(coin_lbl):
+				coin_lbl.text = " %d" % coins
+			_show_powerup_toast("🎉 +10 COINS! %s ACTIVATED!" % powerup_title, Color("#2ecc71"))
+			if on_success_activate.is_valid():
+				on_success_activate.call()
+	)
+
 func _activate_speed_powerup() -> void:
 	if speed_boost_time > 0.0 or is_level_cleared or is_spotted:
 		return
-	if not _try_spend_powerup_coins():
-		return
+	if _has_enough_powerup_coins():
+		_spend_powerup_coins()
+		_apply_speed_powerup()
+	else:
+		_show_rewarded_powerup_dialog("SPEED BOOST", _apply_speed_powerup)
+
+func _apply_speed_powerup() -> void:
 	speed_boost_time = 5.0
 	if SoundManager != null:
 		SoundManager.play_sfx("powerup_speed")
@@ -2569,8 +2733,13 @@ func _activate_invisibility_powerup() -> void:
 		return
 	if invisibility_time > 0.0:
 		return
-	if not _try_spend_powerup_coins():
-		return
+	if _has_enough_powerup_coins():
+		_spend_powerup_coins()
+		_apply_invisibility_powerup()
+	else:
+		_show_rewarded_powerup_dialog("INVISIBILITY", _apply_invisibility_powerup)
+
+func _apply_invisibility_powerup() -> void:
 	invisibility_time = 5.0
 	is_player_invisible = true
 	if SoundManager != null:
@@ -2591,8 +2760,13 @@ func _activate_wall_pass_powerup() -> void:
 		return
 	if wall_pass_time > 0.0:
 		return
-	if not _try_spend_powerup_coins():
-		return
+	if _has_enough_powerup_coins():
+		_spend_powerup_coins()
+		_apply_wall_pass_powerup()
+	else:
+		_show_rewarded_powerup_dialog("BYPASS WALL", _apply_wall_pass_powerup)
+
+func _apply_wall_pass_powerup() -> void:
 	wall_pass_time = 5.0
 	is_wall_pass_active = true
 	if SoundManager != null:
@@ -2643,10 +2817,10 @@ func _show_powerup_toast(text: String, col: Color) -> void:
 	t_style.set_corner_radius_all(18)
 	toast.add_theme_stylebox_override("panel", t_style)
 	toast.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	toast.offset_left = 40.0
-	toast.offset_right = -40.0
-	toast.offset_top = 185.0
-	toast.offset_bottom = 230.0
+	toast.offset_left = 35.0
+	toast.offset_right = -35.0
+	toast.offset_top = 180.0
+	toast.offset_bottom = 245.0
 
 	var t_lbl := Label.new()
 	t_lbl.text = text
@@ -2654,10 +2828,10 @@ func _show_powerup_toast(text: String, col: Color) -> void:
 	t_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	if game_title_font != null:
 		t_lbl.add_theme_font_override("font", game_title_font)
-	t_lbl.add_theme_font_size_override("font_size", 18)
+	t_lbl.add_theme_font_size_override("font_size", 24)
 	t_lbl.add_theme_color_override("font_color", col)
 	t_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
-	t_lbl.add_theme_constant_override("outline_size", 6)
+	t_lbl.add_theme_constant_override("outline_size", 8)
 	toast.add_child(t_lbl)
 	hud_root.add_child(toast)
 
