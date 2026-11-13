@@ -1960,11 +1960,12 @@ func _process(delta: float) -> void:
 			main_camera.position.x = lerpf(main_camera.position.x, target_cam_x, delta * 6.0)
 			main_camera.position.z = lerpf(main_camera.position.z, target_cam_z, delta * 6.0)
 
-		# Victory check: level completes when player collects all required items or reaches outside exit!
+		# Victory check: level completes ONLY when player collects all required items AND returns to start position!
 		var all_collected := (collected_items_count >= target_items_total and target_items_total > 0) or candy_collected
-		if all_collected and not is_entering_level:
-			var is_outside_door := (player_root.position.z >= entrance_door_pos.z + 0.85 and absf(player_root.position.x - entrance_door_pos.x) < 2.2) or player_root.position.distance_to(entrance_outside_pos) < 1.8
-			if is_outside_door:
+		if all_collected and not is_entering_level and not is_level_cleared:
+			var at_start_pos := player_root.position.distance_to(player_spawn_pos) < 1.6
+			var at_outside_exit := (player_root.position.z >= entrance_door_pos.z + 0.65 and absf(player_root.position.x - entrance_door_pos.x) < 2.5) or player_root.position.distance_to(entrance_outside_pos) < 2.0
+			if at_start_pos or at_outside_exit:
 				_trigger_win()
 
 func _on_item_collected(item_id: String, item_name: String, _icon: String, item_node: Node3D) -> void:
@@ -1993,15 +1994,15 @@ func _on_item_collected(item_id: String, item_name: String, _icon: String, item_
 	if collected_items_count >= target_items_total:
 		all_items_collected = true
 		candy_collected = true
-		_update_hud_objective("🎉 ALL ITEMS FOUND!")
+		_update_hud_objective("🏃 ALL ITEMS COLLECTED! RETURN TO START TO ESCAPE!")
+		_show_powerup_toast("🎉 ALL ITEMS FOUND! RETURN TO START TO ESCAPE!", Color("#2ecc71"))
 		if is_instance_valid(spawn_marker_label):
-			spawn_marker_label.text = "LEVEL COMPLETE!"
+			spawn_marker_label.text = "🚪 ESCAPE HERE!"
 			spawn_marker_label.modulate = Color("#2ecc71")
 		if is_instance_valid(spawn_marker_border_mat):
 			spawn_marker_border_mat.albedo_color = Color("#2ecc71")
-		# Level completes immediately upon finding all items!
-		await get_tree().create_timer(0.45).timeout
-		_trigger_win()
+		if SoundManager != null:
+			SoundManager.play_sfx("door")
 	else:
 		_update_hud_objective("FIND REMAINING ITEMS! (%d/%d)" % [collected_items_count, target_items_total])
 
