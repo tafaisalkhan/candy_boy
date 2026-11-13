@@ -35,6 +35,8 @@ var _interstitial_ad = null
 var _rewarded_ad = null
 var _is_banner_requested: bool = false
 var _mock_banner_layer: CanvasLayer = null
+var _mock_interstitial_layer: CanvasLayer = null
+var _mock_rewarded_layer: CanvasLayer = null
 
 # Persistent Callbacks (Kept alive in memory to prevent garbage collection)
 var _init_listener = null
