@@ -1794,6 +1794,14 @@ func _build_player() -> void:
 	is_entering_level = true
 	level_root.add_child(player_root)
 
+	# Entrance watchdog: ensures player never gets stuck in entrance mode
+	get_tree().create_timer(1.6).timeout.connect(func():
+		if is_entering_level:
+			is_entering_level = false
+			if is_instance_valid(player_root):
+				player_root.position = player_spawn_pos
+	)
+
 	var boy_inst: Node3D = BOY_MODEL.instantiate() as Node3D
 	player_mesh = boy_inst
 	player_mesh.scale = Vector3.ONE * 0.55
@@ -1943,8 +1951,8 @@ func _process(delta: float) -> void:
 			main_camera.position.x = lerpf(main_camera.position.x, target_cam_x, delta * 6.0)
 			main_camera.position.z = lerpf(main_camera.position.z, target_cam_z, delta * 6.0)
 
-		# Victory check: level completes ONLY when player collects all required items AND goes OUT through the south door to outside!
-		var all_collected := (collected_items_count >= target_items_total and target_items_total > 0)
+		# Victory check: level completes when player collects all required items or reaches outside exit!
+		var all_collected := (collected_items_count >= target_items_total and target_items_total > 0) or candy_collected
 		if all_collected and not is_entering_level:
 			var is_outside_door := (player_root.position.z >= entrance_door_pos.z + 0.85 and absf(player_root.position.x - entrance_door_pos.x) < 2.2) or player_root.position.distance_to(entrance_outside_pos) < 1.8
 			if is_outside_door:
@@ -1976,12 +1984,15 @@ func _on_item_collected(item_id: String, item_name: String, _icon: String, item_
 	if collected_items_count >= target_items_total:
 		all_items_collected = true
 		candy_collected = true
-		_update_hud_objective("ALL ITEMS FOUND! GO OUT THE EXIT DOOR!")
+		_update_hud_objective("🎉 ALL ITEMS FOUND!")
 		if is_instance_valid(spawn_marker_label):
-			spawn_marker_label.text = "GO OUT HERE!"
+			spawn_marker_label.text = "LEVEL COMPLETE!"
 			spawn_marker_label.modulate = Color("#2ecc71")
 		if is_instance_valid(spawn_marker_border_mat):
 			spawn_marker_border_mat.albedo_color = Color("#2ecc71")
+		# Level completes immediately upon finding all items!
+		await get_tree().create_timer(0.45).timeout
+		_trigger_win()
 	else:
 		_update_hud_objective("FIND REMAINING ITEMS! (%d/%d)" % [collected_items_count, target_items_total])
 
@@ -2039,8 +2050,10 @@ func _handle_player_movement(delta: float) -> void:
 		if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
 			move_dir.z += 1.0
 		# Mobile Virtual Joystick & Touch Drag Movement
-		if touch_move_dir.length_squared() > 0.01:
+		if is_touch_active and touch_move_dir.length_squared() > 0.01:
 			move_dir = touch_move_dir
+		elif not is_touch_active:
+			touch_move_dir = Vector3.ZERO
 		if auto_walk_forward:
 			move_dir.z -= 1.0
 		if auto_walk_loop:
