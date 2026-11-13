@@ -120,6 +120,11 @@ var is_intro_cinematic_active: bool = false
 var intro_cinematic_tween: Tween = null
 var mission_intro_popup: Control = null
 
+# Cinematic Catch Sequence
+var is_catch_cinematic_active: bool = false
+var catch_letterbox_layer: CanvasLayer = null
+var catch_cinematic_tween: Tween = null
+
 # Constants
 const PLAYER_SPEED: float = 4.0
 const WALL_H: float = 2.6
@@ -407,8 +412,8 @@ func _test_cupboard_opening() -> void:
 
 func _test_fail_popup() -> void:
 	await get_tree().create_timer(0.3).timeout
-	_trigger_fail("Alarm! Guard Spotted You!")
-	await get_tree().create_timer(1.2).timeout
+	_trigger_fail("Caught by Granny! Sneak Failed!")
+	await get_tree().create_timer(1.8).timeout
 	var vp := get_viewport()
 	if vp:
 		var img := vp.get_texture().get_image()
@@ -578,6 +583,16 @@ func load_level(lvl: int) -> void:
 	if is_instance_valid(victory_popup):
 		victory_popup.queue_free()
 		victory_popup = null
+	if is_instance_valid(catch_letterbox_layer):
+		catch_letterbox_layer.queue_free()
+		catch_letterbox_layer = null
+	if is_instance_valid(catch_cinematic_tween):
+		catch_cinematic_tween.kill()
+		catch_cinematic_tween = null
+	var b_bubble := get_node_or_null("BoyCatchBubble")
+	if is_instance_valid(b_bubble):
+		b_bubble.queue_free()
+	is_catch_cinematic_active = false
 	wall_colliders.clear()
 	active_lasers.clear()
 	active_buttons.clear()
@@ -2207,17 +2222,195 @@ func _on_button_pressed(target_laser_id: String) -> void:
 		active_lasers[target_laser_id].deactivate()
 
 func _trigger_fail(reason: String) -> void:
-	if auto_walk_loop:
+	if auto_walk_loop or is_catch_cinematic_active:
 		return
 	if is_spotted or is_level_cleared:
 		return
 	is_spotted = true
+	is_catch_cinematic_active = true
+	_reset_mobile_touch()
+
 	if SoundManager != null:
-		SoundManager.play_sfx("fail")
+		SoundManager.play_sfx("catch")
 	if SignalHub != null:
 		SignalHub.emit_level_failed(current_level, reason)
-	_update_hud_objective("🚨 CAUGHT! SNEAK FAILED")
+	_update_hud_objective("🚨 CAUGHT BY GRANNY!")
+
+	# 1. Locate the catching Granny/guard nearest to the player
+	var closest_guard: GuardController = null
+	var min_g_dist := 9999.0
+	if is_instance_valid(player_root):
+		for g in active_guards:
+			if is_instance_valid(g):
+				var d := g.position.distance_to(player_root.position)
+				if d < min_g_dist:
+					min_g_dist = d
+					closest_guard = g
+
+	# 2. Granny confrontation behavior: steps forward, confronts boy, exclaims
+	if closest_guard != null and is_instance_valid(player_root):
+		closest_guard.play_catch_confrontation(player_root.position)
+
+	# 3. Boy startled / caught reaction: turns to face Granny, startled jump, exclamation bubble
+	if is_instance_valid(player_root):
+		if closest_guard != null:
+			var to_g := closest_guard.position - player_root.position
+			to_g.y = 0.0
+			if to_g.length() > 0.01 and is_instance_valid(player_mesh):
+				player_mesh.rotation.y = atan2(to_g.x, to_g.z)
+		if is_instance_valid(player_anim) and player_anim.has_animation("Idle"):
+			player_anim.play("Idle")
+
+		# Startled hop
+		var hop_tw := create_tween()
+		hop_tw.tween_property(player_root, "position:y", 0.42, 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		hop_tw.tween_property(player_root, "position:y", 0.0, 0.22).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
+
+		# Floating comic bubble above Boy
+		var bubble := Label3D.new()
+		bubble.name = "BoyCatchBubble"
+		bubble.text = "😱 OH NO!"
+		bubble.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		bubble.position = player_root.position + Vector3(0.0, 1.85, 0.0)
+		if game_title_font != null:
+			bubble.font = game_title_font
+		bubble.font_size = 42
+		bubble.outline_size = 12
+		bubble.outline_modulate = Color("#2c0b0e")
+		bubble.modulate = Color("#ffeaa7")
+		bubble.scale = Vector3.ZERO
+		add_child(bubble)
+		var bubble_tw := create_tween()
+		bubble_tw.tween_property(bubble, "scale", Vector3.ONE * 1.35, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		bubble_tw.tween_property(bubble, "scale", Vector3.ONE, 0.12)
+
+	# 4. Cinematic Letterbox & "BUSTED BY GRANNY" Banner
+	_create_catch_letterbox()
+
+	# 5. Dramatic Movie Camera Glide Framing Both Characters
+	if is_instance_valid(main_camera) and is_instance_valid(player_root):
+		var focus_target: Vector3 = player_root.position
+		var face_offset := Vector3.ZERO
+		if closest_guard != null:
+			focus_target = (player_root.position + closest_guard.position) * 0.5
+			var diff := closest_guard.position - player_root.position
+			var side := Vector3(-diff.z, 0.0, diff.x).normalized()
+			face_offset = side * 0.75
+
+		var target_cam_pos := focus_target + Vector3(0.0, 2.3, 3.4) + face_offset
+		var target_cam_rot := Vector3(-20.0, 0.0, 0.0)
+
+		if is_instance_valid(catch_cinematic_tween):
+			catch_cinematic_tween.kill()
+		catch_cinematic_tween = create_tween().set_parallel(true)
+		catch_cinematic_tween.tween_property(main_camera, "position", target_cam_pos, 0.55).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		catch_cinematic_tween.tween_property(main_camera, "rotation_degrees", target_cam_rot, 0.55).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		catch_cinematic_tween.tween_property(main_camera, "fov", 42.0, 0.55).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+		# Impact camera punch
+		get_tree().create_timer(0.26).timeout.connect(func():
+			if is_instance_valid(main_camera):
+				var shake_tw := create_tween()
+				shake_tw.tween_property(main_camera, "h_offset", 0.07, 0.04)
+				shake_tw.tween_property(main_camera, "h_offset", -0.06, 0.04)
+				shake_tw.tween_property(main_camera, "h_offset", 0.0, 0.04)
+		)
+
+	# 6. Dramatic Pause: let the player witness Granny catching the boy unfold like a movie!
+	await get_tree().create_timer(1.45).timeout
+
+	# 7. Clean up cinematic overlay before presenting fail popup
+	if is_instance_valid(catch_letterbox_layer):
+		catch_letterbox_layer.queue_free()
+		catch_letterbox_layer = null
+	var b_node := get_node_or_null("BoyCatchBubble")
+	if is_instance_valid(b_node):
+		b_node.queue_free()
+
 	_show_fail_popup(reason)
+
+func _create_catch_letterbox() -> void:
+	if is_instance_valid(catch_letterbox_layer):
+		catch_letterbox_layer.queue_free()
+
+	catch_letterbox_layer = CanvasLayer.new()
+	catch_letterbox_layer.layer = 110
+	add_child(catch_letterbox_layer)
+
+	var root := Control.new()
+	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	catch_letterbox_layer.add_child(root)
+
+	# Top Cinema Bar (slides down)
+	var top_bar := ColorRect.new()
+	top_bar.color = Color.BLACK
+	top_bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	top_bar.offset_top = -120.0
+	top_bar.offset_bottom = 0.0
+	top_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(top_bar)
+
+	# Bottom Cinema Bar (slides up)
+	var bottom_bar := ColorRect.new()
+	bottom_bar.color = Color.BLACK
+	bottom_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	bottom_bar.offset_top = 0.0
+	bottom_bar.offset_bottom = 120.0
+	bottom_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(bottom_bar)
+
+	# Subtle red dramatic vignette
+	var vignette := ColorRect.new()
+	vignette.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vignette.color = Color(0.9, 0.1, 0.1, 0.28)
+	vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(vignette)
+
+	# Comic Center Banner: "🚨 BUSTED BY GRANNY! 🚨"
+	var banner_box := PanelContainer.new()
+	banner_box.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	banner_box.offset_top = 100.0
+	banner_box.offset_left = -280.0
+	banner_box.offset_right = 280.0
+	banner_box.offset_bottom = 180.0
+	banner_box.pivot_offset = Vector2(280.0, 40.0)
+	banner_box.scale = Vector2.ZERO
+
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.88, 0.12, 0.18, 0.95)
+	sb.border_width_left = 4
+	sb.border_width_top = 4
+	sb.border_width_right = 4
+	sb.border_width_bottom = 4
+	sb.border_color = Color("#f1c40f")
+	sb.corner_radius_top_left = 16
+	sb.corner_radius_top_right = 16
+	sb.corner_radius_bottom_left = 16
+	sb.corner_radius_bottom_right = 16
+	sb.shadow_size = 12
+	sb.shadow_color = Color(0, 0, 0, 0.6)
+	banner_box.add_theme_stylebox_override("panel", sb)
+	root.add_child(banner_box)
+
+	var lbl := Label.new()
+	lbl.text = "🚨 BUSTED BY GRANNY! 🚨"
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	if game_title_font != null:
+		lbl.add_theme_font_override("font", game_title_font)
+	lbl.add_theme_font_size_override("font_size", 26)
+	lbl.add_theme_color_override("font_color", Color.WHITE)
+	lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	lbl.add_theme_constant_override("outline_size", 8)
+	banner_box.add_child(lbl)
+
+	# Animate bars & banner
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(top_bar, "offset_bottom", 85.0, 0.35).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(bottom_bar, "offset_top", -85.0, 0.35).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(vignette, "color:a", 0.08, 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(banner_box, "scale", Vector2.ONE, 0.32).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func _setup_hud() -> void:
 	hud_root = CanvasLayer.new()
@@ -2347,8 +2540,8 @@ func _setup_hud() -> void:
 	tray.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	tray.offset_left = -220.0
 	tray.offset_right = 220.0
-	tray.offset_top = -115.0
-	tray.offset_bottom = -15.0
+	tray.offset_top = -135.0
+	tray.offset_bottom = -35.0
 
 	var tray_style := StyleBoxEmpty.new()
 	tray.add_theme_stylebox_override("panel", tray_style)
@@ -3136,7 +3329,7 @@ func _show_fail_popup(reason: String) -> void:
 	var scene := load("res://scenes/popups/fail_popup.tscn") as PackedScene
 	if scene != null:
 		fail_popup = scene.instantiate()
-		fail_popup.setup(reason if not reason.is_empty() else "YOU WERE SPOTTED BY THE GUARD!", "💡 TIP: Sneak when guards turn away or use Invisibility!", "res://assets/ui/boy_crying_fail.png")
+		fail_popup.setup(reason if not reason.is_empty() else "YOU WERE CAUGHT BY GRANNY!", "💡 TIP: Sneak past Granny when she looks away, or use Invisibility to recover your items!", "res://assets/ui/boy_crying_fail.png")
 		fail_popup.retry_pressed.connect(_on_retry_pressed)
 		hud_root.add_child(fail_popup)
 
@@ -3146,6 +3339,16 @@ func _on_retry_pressed() -> void:
 	if is_instance_valid(fail_popup):
 		fail_popup.queue_free()
 		fail_popup = null
+	if is_instance_valid(catch_letterbox_layer):
+		catch_letterbox_layer.queue_free()
+		catch_letterbox_layer = null
+	if is_instance_valid(catch_cinematic_tween):
+		catch_cinematic_tween.kill()
+		catch_cinematic_tween = null
+	var b_node := get_node_or_null("BoyCatchBubble")
+	if is_instance_valid(b_node):
+		b_node.queue_free()
+	is_catch_cinematic_active = false
 	is_spotted = false
 	is_level_cleared = false
 	candy_collected = false

@@ -117,7 +117,8 @@ func _load_banner() -> void:
 		return
 
 	print("[AdManager] Loading banner ad unit: %s" % BANNER_AD_ID)
-	_banner_view = AdView.new(BANNER_AD_ID, AdSize.BANNER, AdPosition.BOTTOM)
+	# Position banner on the side (RIGHT) so it never covers power-ups at the bottom or objectives at the top!
+	_banner_view = AdView.new(BANNER_AD_ID, AdSize.BANNER, AdPosition.RIGHT)
 	_banner_cb = AdListener.new()
 	_banner_cb.on_ad_loaded = func():
 		print("[AdManager] Banner ad loaded successfully!")
@@ -141,35 +142,79 @@ func _load_banner() -> void:
 	_banner_view.ad_listener = _banner_cb
 	_banner_view.load_ad(AdRequest.new())
 
+# Intermittent Banner Timer Settings:
+# Shows banner temporarily for 18 seconds, then hides it for 42 seconds!
+const BANNER_VISIBLE_TIME: float = 18.0
+const BANNER_HIDDEN_TIME: float = 42.0
+
+var _is_banner_cycle_active: bool = false
+var _banner_cycle_tween: Tween = null
+
 func show_banner() -> void:
 	if is_ads_removed:
 		print("[AdManager] Banner not shown: Ads removed via IAP.")
 		return
 
 	_is_banner_requested = true
-
-	if not _plugin_available:
-		print("[AdManager-Mock] show_banner() running in desktop simulation.")
-		_show_mock_desktop_banner()
-		return
-
-	if not is_initialized:
-		print("[AdManager] Banner requested, but MobileAds SDK is still initializing... Will show automatically once loaded.")
-		return
-
-	if _banner_view == null:
-		print("[AdManager] Banner requested, loading now...")
-		_load_banner()
-	elif _banner_view.has_method("show"):
-		print("[AdManager] Showing Banner ad...")
-		_banner_view.show()
+	if not _is_banner_cycle_active:
+		_start_banner_interval_cycle()
 
 func hide_banner() -> void:
 	_is_banner_requested = false
-	if _banner_view and _banner_view.has_method("hide"):
-		_banner_view.hide()
-	if is_instance_valid(_mock_banner_layer):
-		_mock_banner_layer.visible = false
+	_stop_banner_interval_cycle()
+	_apply_banner_visibility(false)
+
+func _start_banner_interval_cycle() -> void:
+	_is_banner_cycle_active = true
+	_run_banner_cycle_step(true)
+
+func _stop_banner_interval_cycle() -> void:
+	_is_banner_cycle_active = false
+	if _banner_cycle_tween != null and _banner_cycle_tween.is_valid():
+		_banner_cycle_tween.kill()
+		_banner_cycle_tween = null
+
+func _run_banner_cycle_step(show_now: bool) -> void:
+	if not _is_banner_requested or is_ads_removed or not _is_banner_cycle_active:
+		_apply_banner_visibility(false)
+		return
+
+	_apply_banner_visibility(show_now)
+
+	if _banner_cycle_tween != null and _banner_cycle_tween.is_valid():
+		_banner_cycle_tween.kill()
+	_banner_cycle_tween = create_tween()
+
+	var wait_time: float = BANNER_VISIBLE_TIME if show_now else BANNER_HIDDEN_TIME
+	_banner_cycle_tween.tween_interval(wait_time)
+	_banner_cycle_tween.tween_callback(func():
+		if _is_banner_requested and not is_ads_removed and _is_banner_cycle_active:
+			_run_banner_cycle_step(not show_now)
+	)
+
+func _apply_banner_visibility(is_visible: bool) -> void:
+	if not _plugin_available:
+		if is_visible:
+			_show_mock_desktop_banner()
+		else:
+			if is_instance_valid(_mock_banner_layer):
+				_mock_banner_layer.visible = false
+		return
+
+	if not is_initialized:
+		if is_visible and _banner_view == null:
+			_load_banner()
+		return
+
+	if _banner_view == null:
+		if is_visible:
+			_load_banner()
+	elif is_visible:
+		if _banner_view.has_method("show"):
+			_banner_view.show()
+	else:
+		if _banner_view.has_method("hide"):
+			_banner_view.hide()
 
 func _show_mock_desktop_banner() -> void:
 	if is_ads_removed:
@@ -184,28 +229,34 @@ func _show_mock_desktop_banner() -> void:
 	add_child(_mock_banner_layer)
 
 	var banner_box := PanelContainer.new()
-	banner_box.custom_minimum_size = Vector2(480, 50)
-	banner_box.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	banner_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	banner_box.offset_top = -50
+	banner_box.custom_minimum_size = Vector2(50, 240)
+	# Anchored to right side instead of top or bottom to avoid blocking power-ups or HUD
+	banner_box.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
+	banner_box.offset_left = -55
+	banner_box.offset_right = -5
+	banner_box.offset_top = 220
+	banner_box.offset_bottom = -220
 	banner_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.10, 0.12, 0.16, 0.95)
 	style.border_color = Color("#f1c40f")
-	style.border_width_top = 2
+	style.border_width_left = 2
+	style.corner_radius_top_left = 8
+	style.corner_radius_bottom_left = 8
 	banner_box.add_theme_stylebox_override("panel", style)
 
-	var hbox := HBoxContainer.new()
-	hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	banner_box.add_child(hbox)
+	var vbox := VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	banner_box.add_child(vbox)
 
 	var ad_badge := Label.new()
-	ad_badge.text = "[Ad] Google AdMob Banner (320x50)"
+	ad_badge.text = "[Ad]\nAdMob\nBanner"
+	ad_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	ad_badge.add_theme_color_override("font_color", Color("#ecf0f1"))
-	ad_badge.add_theme_font_size_override("font_size", 16)
-	hbox.add_child(ad_badge)
+	ad_badge.add_theme_font_size_override("font_size", 13)
+	vbox.add_child(ad_badge)
 
 	_mock_banner_layer.add_child(banner_box)
 

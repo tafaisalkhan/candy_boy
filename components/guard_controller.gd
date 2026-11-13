@@ -341,6 +341,41 @@ func update_guard(delta: float, p_pos: Vector3, wall_colliders: Array[AABB], is_
 	if not is_player_invisible and _is_target_in_cone(p_pos, origin, guard_forward, current_vision_range, vision_angle, wall_colliders):
 		player_spotted.emit("Caught by Granny!")
 
+func play_catch_confrontation(p_pos: Vector3) -> void:
+	is_hunting_player = false
+	pause_timer = 9999.0 # Freeze routine patrol
+	escape_timer = 0.0
+	if is_instance_valid(cone_instance):
+		cone_instance.visible = false
+	if is_instance_valid(alert_ring):
+		alert_ring.visible = true
+
+	var to_player := p_pos - position
+	to_player.y = 0.0
+	var dist := to_player.length()
+	if dist > 0.05:
+		facing_yaw = atan2(to_player.x, to_player.z)
+		if is_instance_valid(visual_node):
+			visual_node.rotation.y = facing_yaw + PI
+
+		# If Granny is some distance away, lunge/step forward to confront boy face-to-face
+		var step_dist := clampf(dist - 0.92, 0.0, 2.2)
+		if step_dist > 0.1:
+			var target_pos := position + to_player.normalized() * step_dist
+			var tw := create_tween()
+			tw.tween_property(self, "position", target_pos, 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			_play_anim("Walk")
+			tw.finished.connect(func():
+				_play_anim("Idle")
+			)
+		else:
+			_play_anim("Idle")
+
+	if is_instance_valid(badge_label_3d):
+		badge_label_3d.text = "🚨 GOTCHA!"
+		badge_label_3d.modulate = Color(1.0, 0.2, 0.2)
+
+
 func _render_vision_cone(origin: Vector3, forward: Vector3, v_range: float, half_angle: float, colliders: Array[AABB]) -> void:
 	if cone_mesh == null:
 		return

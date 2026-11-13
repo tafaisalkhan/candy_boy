@@ -3,7 +3,7 @@ extends Control
 
 signal start_pressed
 
-@export var title_text: String = "🎒 COLLECT THESE ITEMS! 🎒"
+@export var title_text: String = "🎒 TAKE BACK YOUR ITEMS! 🎒"
 @export var button_text: String = "START SNEAKING ▶"
 
 var game_title_font: Font = null
