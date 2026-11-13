@@ -88,6 +88,7 @@ var entrance_outside_pos: Vector3 = Vector3(0.0, 0.0, 11.2)
 var is_entering_level: bool = false
 var spawn_marker_label: Label3D = null
 var spawn_marker_border_mat: StandardMaterial3D = null
+var spawn_marker_pos: Vector3 = Vector3.ZERO
 var active_level_data: Dictionary = {}
 
 # Powerups State (Speed, Invisibility, and Wall Pass)
@@ -1608,6 +1609,7 @@ func _open_cupboard_and_collect() -> void:
 		_open_container_and_collect(active_containers[0])
 
 func _create_spawn_marker(pos: Vector3, parent: Node3D) -> void:
+	spawn_marker_pos = pos
 	var pad := MeshInstance3D.new()
 	var box := BoxMesh.new()
 	box.size = Vector3(2.4, 0.015, 1.6)
@@ -1978,9 +1980,10 @@ func _process(delta: float) -> void:
 		# Victory check: level completes ONLY when player collects all required items AND returns to start position!
 		var all_collected := (collected_items_count >= target_items_total and target_items_total > 0) or candy_collected
 		if all_collected and not is_entering_level and not is_level_cleared:
-			var at_start_pos := player_root.position.distance_to(player_spawn_pos) < 1.6
-			var at_outside_exit := (player_root.position.z >= entrance_door_pos.z + 0.65 and absf(player_root.position.x - entrance_door_pos.x) < 2.5) or player_root.position.distance_to(entrance_outside_pos) < 2.0
-			if at_start_pos or at_outside_exit:
+			var at_start_pos := player_root.position.distance_to(player_spawn_pos) < 2.0
+			var at_marker := (spawn_marker_pos != Vector3.ZERO and player_root.position.distance_to(spawn_marker_pos) < 2.2)
+			var at_outside_exit := (player_root.position.z >= entrance_door_pos.z + 0.5 and absf(player_root.position.x - entrance_door_pos.x) < 2.6) or player_root.position.distance_to(entrance_outside_pos) < 2.2
+			if at_start_pos or at_marker or at_outside_exit:
 				_trigger_win()
 
 func _on_item_collected(item_id: String, item_name: String, _icon: String, item_node: Node3D) -> void:
