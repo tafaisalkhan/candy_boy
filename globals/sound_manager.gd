@@ -10,6 +10,19 @@ var _streams: Dictionary = {}
 var _last_footstep_ms: int = 0
 var _last_locked_sfx_ms: int = 0
 
+var sfx_enabled: bool = true
+var music_enabled: bool = true
+
+func set_music_enabled(val: bool) -> void:
+	music_enabled = val
+	if not music_enabled:
+		stop_or_duck_bgm(true)
+	else:
+		start_bgm()
+
+func set_sfx_enabled(val: bool) -> void:
+	sfx_enabled = val
+
 func _ready() -> void:
 	for i in POOL_SIZE:
 		add_player_3d()
@@ -72,7 +85,7 @@ func _load_all_sounds() -> void:
 	_streams["spin"] = _load_audio("res://assets/sounds/projectiles/361222__rollin_pin_spin.wav")
 
 func start_bgm() -> void:
-	if not is_instance_valid(_bgm_player):
+	if not music_enabled or not is_instance_valid(_bgm_player):
 		return
 	var bgm_stream: AudioStream = _streams.get("bgm")
 	if bgm_stream == null:
@@ -133,6 +146,8 @@ func _play_stream_2d(stream: AudioStream, pitch: float = 1.0, vol_db: float = 0.
 	player.play()
 
 func play_sfx(event_name: String, pitch: float = 1.0, vol_db: float = -1.5) -> void:
+	if not sfx_enabled:
+		return
 	match event_name:
 		"start":
 			start_bgm()
@@ -174,6 +189,8 @@ func play_sfx(event_name: String, pitch: float = 1.0, vol_db: float = -1.5) -> v
 			_play_stream_2d(_streams.get(event_name), pitch, vol_db)
 
 func play_footstep() -> void:
+	if not sfx_enabled:
+		return
 	var now := Time.get_ticks_msec()
 	if now - _last_footstep_ms < 320:
 		return
