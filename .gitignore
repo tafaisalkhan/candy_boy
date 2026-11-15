@@ -48,7 +48,11 @@ build/
 *.aab
 *.apk
 
-# Local-only AdMob production IDs
+# Local-only AdMob production IDs & Keystore credentials
 admob_secrets.gd
 admob_secrets.gd.uid
+admob_secrets.json
+key.properties
+**/key.properties
+keystore_credentials*
 
