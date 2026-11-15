@@ -48,3 +48,7 @@ build/
 *.aab
 *.apk
 
+# Local-only AdMob production IDs
+admob_secrets.gd
+admob_secrets.gd.uid
+

@@ -38,8 +38,8 @@ func _ready() -> void:
 	title_shadow.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	title_shadow.offset_left = 30.0
 	title_shadow.offset_right = -30.0
-	title_shadow.offset_top = 55.0
-	title_shadow.offset_bottom = 270.0
+	title_shadow.offset_top = 120.0
+	title_shadow.offset_bottom = 330.0
 	title_shadow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title_shadow.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	title_shadow.add_theme_font_override("font", title_font)
@@ -55,8 +55,8 @@ func _ready() -> void:
 	title.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	title.offset_left = 30.0
 	title.offset_right = -30.0
-	title.offset_top = 42.0
-	title.offset_bottom = 252.0
+	title.offset_top = 107.0
+	title.offset_bottom = 312.0
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	title.add_theme_font_override("font", title_font)
@@ -72,7 +72,11 @@ func _ready() -> void:
 	# 2. Action Buttons Container (Hidden initially, appears after loading)
 	_build_action_buttons_ui(title_font)
 
-	game_scene = load(GAME_SCENE) as PackedScene
+	ResourceLoader.load_threaded_request(GAME_SCENE)
+
+	var ad_mgr = AdManager if AdManager != null else get_tree().root.get_node_or_null("AdManager")
+	if ad_mgr != null and ad_mgr.has_method("show_banner"):
+		ad_mgr.show_banner()
 
 	var all_args := OS.get_cmdline_user_args() + OS.get_cmdline_args()
 
@@ -136,8 +140,8 @@ func _build_loader_ui(p_font: Font) -> void:
 	loader_container.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	loader_container.offset_left = 140.0
 	loader_container.offset_right = -140.0
-	loader_container.offset_top = -200.0
-	loader_container.offset_bottom = -75.0
+	loader_container.offset_top = -270.0
+	loader_container.offset_bottom = -145.0
 	loader_container.alignment = BoxContainer.ALIGNMENT_CENTER
 	loader_container.add_theme_constant_override("separation", 14)
 	add_child(loader_container)
@@ -188,8 +192,8 @@ func _build_action_buttons_ui(p_font: Font) -> void:
 	button_container.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	button_container.offset_left = 130.0
 	button_container.offset_right = -130.0
-	button_container.offset_top = -240.0
-	button_container.offset_bottom = -45.0
+	button_container.offset_top = -345.0
+	button_container.offset_bottom = -145.0
 	button_container.alignment = BoxContainer.ALIGNMENT_CENTER
 	button_container.add_theme_constant_override("separation", 14)
 	button_container.visible = false
@@ -231,16 +235,35 @@ func _build_action_buttons_ui(p_font: Font) -> void:
 	button_container.add_child(settings_button)
 
 
-func _start_loading_animation() -> void:
-	var tween := create_tween()
-	tween.tween_method(func(v: float):
-		if is_instance_valid(loading_bar):
-			loading_bar.value = v
-		if is_instance_valid(loading_label):
-			loading_label.text = "LOADING MISSIONS... %d%%" % int(v)
-	, 0.0, 100.0, 1.8).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+var _polling_threaded_load: bool = false
 
-	tween.tween_callback(_on_loading_finished)
+func _start_loading_animation() -> void:
+	_polling_threaded_load = true
+
+func _process(_delta: float) -> void:
+	if not _polling_threaded_load:
+		return
+	var progress: Array = []
+	var status := ResourceLoader.load_threaded_get_status(GAME_SCENE, progress)
+	var pct := float(progress[0]) * 100.0 if not progress.is_empty() else 0.0
+	if status == ResourceLoader.THREAD_LOAD_LOADED:
+		pct = 100.0
+		_polling_threaded_load = false
+		game_scene = ResourceLoader.load_threaded_get(GAME_SCENE) as PackedScene
+		if is_instance_valid(loading_bar):
+			loading_bar.value = 100.0
+		if is_instance_valid(loading_label):
+			loading_label.text = "LOADING MISSIONS... 100%"
+		_on_loading_finished()
+		return
+	if status == ResourceLoader.THREAD_LOAD_FAILED or status == ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+		_polling_threaded_load = false
+		_on_loading_finished()
+		return
+	if is_instance_valid(loading_bar):
+		loading_bar.value = maxf(loading_bar.value, pct)
+	if is_instance_valid(loading_label):
+		loading_label.text = "LOADING MISSIONS... %d%%" % int(loading_bar.value)
 
 
 func _on_loading_finished() -> void:
@@ -329,6 +352,8 @@ func _start_game(force_start: bool = false) -> void:
 	print("SPLASH: starting game...")
 	if SoundManager != null:
 		SoundManager.play_sfx("button")
+	if game_scene == null and ResourceLoader.load_threaded_get_status(GAME_SCENE) == ResourceLoader.THREAD_LOAD_LOADED:
+		game_scene = ResourceLoader.load_threaded_get(GAME_SCENE) as PackedScene
 	if game_scene != null:
 		get_tree().change_scene_to_packed(game_scene)
 	else:

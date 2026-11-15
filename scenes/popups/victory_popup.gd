@@ -50,16 +50,16 @@ func _build_ui() -> void:
 	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(backdrop)
 
-	# 2. Main Victory Dialog Card
+	# 2. Centered Container so the victory card never overflows off-screen
+	var center_wrap := CenterContainer.new()
+	center_wrap.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center_wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(center_wrap)
+
 	var card := PanelContainer.new()
 	card.name = "VictoryCard"
-	card.custom_minimum_size = Vector2(780, 800)
-	card.set_anchors_preset(Control.PRESET_CENTER)
-	card.pivot_offset = Vector2(390, 400)
-	card.offset_left = -390
-	card.offset_top = -400
-	card.offset_right = 390
-	card.offset_bottom = 400
+	card.custom_minimum_size = Vector2(680, 0)
+	card.pivot_offset = Vector2(340, 380)
 
 	var card_style := StyleBoxFlat.new()
 	card_style.bg_color = Color("#15212d")
@@ -69,17 +69,24 @@ func _build_ui() -> void:
 	card_style.shadow_color = Color(0, 0, 0, 0.7)
 	card_style.shadow_size = 35
 	card.add_theme_stylebox_override("panel", card_style)
-	add_child(card)
+	center_wrap.add_child(card)
+
+	var card_margin := MarginContainer.new()
+	card_margin.add_theme_constant_override("margin_left", 24)
+	card_margin.add_theme_constant_override("margin_top", 22)
+	card_margin.add_theme_constant_override("margin_right", 24)
+	card_margin.add_theme_constant_override("margin_bottom", 24)
+	card.add_child(card_margin)
 
 	var v_box := VBoxContainer.new()
 	v_box.alignment = BoxContainer.ALIGNMENT_CENTER
-	v_box.add_theme_constant_override("separation", 14)
-	card.add_child(v_box)
+	v_box.add_theme_constant_override("separation", 12)
+	card_margin.add_child(v_box)
 
 	# 3D Golden Curved Ribbon Banner
 	var banner_box := Panel.new()
-	banner_box.custom_minimum_size = Vector2(580, 88)
-	banner_box.size = Vector2(580, 88)
+	banner_box.custom_minimum_size = Vector2(520, 78)
+	banner_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var b_trans := StyleBoxEmpty.new()
 	banner_box.add_theme_stylebox_override("panel", b_trans)
 	v_box.add_child(banner_box)
@@ -112,7 +119,7 @@ func _build_ui() -> void:
 	stars_row.add_theme_constant_override("separation", 24)
 	v_box.add_child(stars_row)
 
-	var star_tex := _load_texture("res://assets/ui/star_3d_gold.svg")
+	var star_tex := _load_texture("res://assets/ui/victory-star.png")
 	var star_nodes: Array[TextureRect] = []
 
 	var star_configs := [
@@ -150,9 +157,11 @@ func _build_ui() -> void:
 	var sub_lbl := Label.new()
 	sub_lbl.text = "ALL ITEMS SECURED & SAFELY ESCAPED!"
 	sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sub_lbl.custom_minimum_size = Vector2(580, 0)
 	if game_body_font != null:
 		sub_lbl.add_theme_font_override("font", game_body_font)
-	sub_lbl.add_theme_font_size_override("font_size", 24)
+	sub_lbl.add_theme_font_size_override("font_size", 22)
 	sub_lbl.add_theme_color_override("font_color", Color("#00cec9"))
 	sub_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
 	sub_lbl.add_theme_constant_override("outline_size", 8)
@@ -160,7 +169,8 @@ func _build_ui() -> void:
 
 	# Boy Picture Frame
 	var img_frame := PanelContainer.new()
-	img_frame.custom_minimum_size = Vector2(660, 340)
+	img_frame.custom_minimum_size = Vector2(580, 260)
+	img_frame.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var f_style := StyleBoxFlat.new()
 	f_style.bg_color = Color("#0984e3")
 	f_style.set_corner_radius_all(22)
@@ -180,7 +190,7 @@ func _build_ui() -> void:
 
 	# Radiating Flying Sparkles
 	var sparkles := CPUParticles2D.new()
-	sparkles.position = Vector2(390, 320)
+	sparkles.position = Vector2(340, 290)
 	sparkles.amount = 38
 	sparkles.lifetime = 1.4
 	sparkles.speed_scale = 1.0
@@ -197,7 +207,7 @@ func _build_ui() -> void:
 	card.add_child(sparkles)
 
 	# Additional Floating Sparkling Emoji Stars around the corners
-	for offset_pos in [Vector2(45, 165), Vector2(695, 165), Vector2(45, 485), Vector2(695, 485)]:
+	for offset_pos in [Vector2(40, 145), Vector2(600, 145), Vector2(40, 445), Vector2(600, 445)]:
 		var star_lbl := Label.new()
 		star_lbl.text = "✨"
 		star_lbl.position = offset_pos
@@ -209,7 +219,8 @@ func _build_ui() -> void:
 
 	# Reward Box Container
 	reward_box = PanelContainer.new()
-	reward_box.custom_minimum_size = Vector2(620, 84)
+	reward_box.custom_minimum_size = Vector2(560, 74)
+	reward_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var r_style := StyleBoxFlat.new()
 	r_style.bg_color = Color("#2d3436")
 	r_style.border_color = Color("#f39c12")
@@ -222,9 +233,12 @@ func _build_ui() -> void:
 	r_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	reward_box.add_child(r_hbox)
 
-	var r_icon := Label.new()
-	r_icon.text = "🪙"
-	r_icon.add_theme_font_size_override("font_size", 38)
+	var r_icon := TextureRect.new()
+	r_icon.texture = _load_texture("res://assets/ui/reward-coin.png")
+	r_icon.custom_minimum_size = Vector2(44, 44)
+	r_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	r_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	r_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	r_hbox.add_child(r_icon)
 
 	var r_text := Label.new()
@@ -240,7 +254,8 @@ func _build_ui() -> void:
 	# Rewarded Video Ad Button (2X Double Coins)
 	var ad_btn := Button.new()
 	ad_btn.text = "🎬 2X REWARD (+%d COINS)" % reward_coins
-	ad_btn.custom_minimum_size = Vector2(580, 80)
+	ad_btn.custom_minimum_size = Vector2(520, 72)
+	ad_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var ad_style := StyleBoxFlat.new()
 	ad_style.bg_color = Color("#f39c12")
 	ad_style.border_color = Color("#d35400")
@@ -291,7 +306,8 @@ func _build_ui() -> void:
 	# Tactile 3D Continue Button
 	var cont_btn := Button.new()
 	cont_btn.text = "CONTINUE ➔"
-	cont_btn.custom_minimum_size = Vector2(580, 96)
+	cont_btn.custom_minimum_size = Vector2(520, 84)
+	cont_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var btn_style := StyleBoxFlat.new()
 	btn_style.bg_color = Color("#2ecc71")
 	btn_style.border_color = Color("#1e824c")

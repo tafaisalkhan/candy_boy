@@ -107,9 +107,12 @@ func setup(level_num: int, target_items: Array, current_coins: int, title_font: 
 	coin_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	coin_panel.add_child(coin_box)
 
-	var coin_icon := Label.new()
-	coin_icon.text = "🪙"
-	coin_icon.add_theme_font_size_override("font_size", 20)
+	var coin_icon := TextureRect.new()
+	coin_icon.texture = load("res://assets/ui/reward-coin.png") as Texture2D
+	coin_icon.custom_minimum_size = Vector2(26, 26)
+	coin_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	coin_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	coin_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	coin_box.add_child(coin_icon)
 
 	coin_lbl = Label.new()

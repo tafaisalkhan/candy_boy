@@ -165,13 +165,8 @@ func _ready() -> void:
 
 	load_level(current_level)
 
-	# Show Banner Ad on bottom of screen (AdMob)
-	if AdManager != null and AdManager.has_method("show_banner"):
-		AdManager.show_banner()
-	else:
-		var ad_mgr = get_tree().root.get_node_or_null("AdManager")
-		if ad_mgr != null and ad_mgr.has_method("show_banner"):
-			ad_mgr.show_banner()
+	# Show both top and bottom banners during intro/menu overlay
+	_set_ad_banner_mode(false)
 
 	if "--screen-game" in all_args or "--screenshot" in all_args or FileAccess.file_exists("res://test_screenshot.flag"):
 		if FileAccess.file_exists("res://test_screenshot.flag"):
@@ -550,6 +545,8 @@ func _setup_environment() -> void:
 
 func load_level(lvl: int) -> void:
 	current_level = lvl
+	if SoundManager != null:
+		SoundManager.start_bgm()
 	is_game_active = false
 	is_level_cleared = false
 	is_spotted = false
@@ -629,6 +626,8 @@ func load_level(lvl: int) -> void:
 		var cam_rot_arr: Array = cam_info.get("rotation_degrees", [-66.0, 0.0, 0.0])
 		main_camera.rotation_degrees = Vector3(float(cam_rot_arr[0]), float(cam_rot_arr[1]), float(cam_rot_arr[2]))
 		main_camera.fov = float(cam_info.get("fov", 48.0))
+	else:
+		_reset_camera_to_origin()
 
 	_build_level_geometry()
 	_build_player()
@@ -671,40 +670,41 @@ func _start_intro_sequence() -> void:
 	if focus_targets.is_empty():
 		main_camera.position = entrance_cam
 		is_intro_cinematic_active = false
+		_set_ad_banner_mode(true)
 		return
 
 	is_intro_cinematic_active = true
 	intro_cinematic_tween = create_tween()
 
-	# Focus camera directly on where to find the items!
-	var max_targets := mini(focus_targets.size(), 2)
+	# Focus camera briefly on the primary target item while the player enters through the door
+	var max_targets := mini(focus_targets.size(), 1)
 	for i in range(max_targets):
 		var target: Dictionary = focus_targets[i]
 		var t_pos: Vector3 = target["pos"]
 		var target_cam := Vector3(t_pos.x * 0.85, 20.0, t_pos.z + 4.2)
 
-		# Fast, smooth glide to target item location (0.45s)
-		intro_cinematic_tween.tween_property(main_camera, "position", target_cam, 0.48).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		# Smooth, readable glide to target item location
+		intro_cinematic_tween.tween_property(main_camera, "position", target_cam, 0.85).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 
 		# Highlight & pulse beacon so player sees exactly where the item is
 		intro_cinematic_tween.chain().tween_callback(func():
 			if is_instance_valid(target.get("beacon")):
 				var b_tw := create_tween()
-				b_tw.tween_property(target["beacon"], "scale", Vector3.ONE * 1.5, 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-				b_tw.tween_property(target["beacon"], "scale", Vector3.ONE, 0.18)
+				b_tw.tween_property(target["beacon"], "scale", Vector3.ONE * 1.5, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				b_tw.tween_property(target["beacon"], "scale", Vector3.ONE, 0.25)
 			if is_instance_valid(target.get("prompt")):
 				target["prompt"].visible = true
 			if SoundManager != null:
 				SoundManager.play_sfx("cabinet")
 		)
-		intro_cinematic_tween.chain().tween_interval(0.40)
+		intro_cinematic_tween.chain().tween_interval(0.90)
 		intro_cinematic_tween.chain().tween_callback(func():
 			if is_instance_valid(target.get("prompt")):
 				target["prompt"].visible = false
 		)
 
 	# Smoothly return camera to player spawn ready to play
-	intro_cinematic_tween.chain().tween_property(main_camera, "position", entrance_cam, 0.48).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	intro_cinematic_tween.chain().tween_property(main_camera, "position", entrance_cam, 0.85).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 	intro_cinematic_tween.chain().tween_callback(func():
 		_end_intro_sequence()
 	)
@@ -733,6 +733,7 @@ func _end_intro_sequence() -> void:
 		tw.tween_property(mission_intro_popup, "modulate:a", 0.0, 0.25)
 		tw.chain().tween_callback(mission_intro_popup.queue_free)
 	is_intro_cinematic_active = false
+	_set_ad_banner_mode(true)
 
 func _build_level_geometry() -> void:
 	var rooms: Array = active_level_data.get("rooms", [])
@@ -1823,9 +1824,9 @@ func _build_player() -> void:
 
 	player_root = Node3D.new()
 	player_root.name = "Player"
-	# Drop player directly at spawn position inside room - ready to control instantly!
-	player_root.position = player_spawn_pos
-	is_entering_level = false
+	# Spawn player outside the entrance door so they walk in through the door at level start.
+	player_root.position = entrance_outside_pos
+	is_entering_level = true
 	level_root.add_child(player_root)
 
 	var boy_inst: Node3D = BOY_MODEL.instantiate() as Node3D
@@ -1848,6 +1849,11 @@ func _build_player() -> void:
 				if material is StandardMaterial3D:
 					textured_material = (material as StandardMaterial3D).duplicate() as StandardMaterial3D
 				textured_material.albedo_texture = skin_texture
+				textured_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				textured_material.albedo_color.a = 1.0
+				textured_material.emission_enabled = true
+				textured_material.emission = Color.BLACK
+				textured_material.emission_energy_multiplier = 0.0
 				mesh_instance.set_surface_override_material(surface, textured_material)
 
 	# Load Boy animation clips
@@ -1975,15 +1981,14 @@ func _process(delta: float) -> void:
 			var target_cam_x := player_root.position.x * 0.75
 			var target_cam_z := player_root.position.z + 4.5
 			main_camera.position.x = lerpf(main_camera.position.x, target_cam_x, delta * 6.0)
+			main_camera.position.y = lerpf(main_camera.position.y, 27.5, delta * 6.0)
 			main_camera.position.z = lerpf(main_camera.position.z, target_cam_z, delta * 6.0)
 
-		# Victory check: level completes ONLY when player collects all required items AND returns to start position!
+		# Victory check: level completes ONLY when player collects all required items AND walks outside through the entrance door!
 		var all_collected := (collected_items_count >= target_items_total and target_items_total > 0) or candy_collected
 		if all_collected and not is_entering_level and not is_level_cleared:
-			var at_start_pos := player_root.position.distance_to(player_spawn_pos) < 2.0
-			var at_marker := (spawn_marker_pos != Vector3.ZERO and player_root.position.distance_to(spawn_marker_pos) < 2.2)
-			var at_outside_exit := (player_root.position.z >= entrance_door_pos.z + 0.5 and absf(player_root.position.x - entrance_door_pos.x) < 2.6) or player_root.position.distance_to(entrance_outside_pos) < 2.2
-			if at_start_pos or at_marker or at_outside_exit:
+			var at_outside_exit := (player_root.position.z >= entrance_door_pos.z + 1.0 and absf(player_root.position.x - entrance_door_pos.x) < 2.6) or player_root.position.distance_to(entrance_outside_pos) < 2.2
+			if at_outside_exit:
 				_trigger_win()
 
 func _on_item_collected(item_id: String, item_name: String, _icon: String, item_node: Node3D) -> void:
@@ -2042,6 +2047,7 @@ func _trigger_win() -> void:
 		return
 	is_level_cleared = true
 	if SoundManager != null:
+		SoundManager.stop_footstep()
 		SoundManager.play_sfx("victory")
 	if SignalHub != null:
 		SignalHub.emit_level_victory(current_level, 20)
@@ -2111,6 +2117,7 @@ func _handle_player_movement(delta: float) -> void:
 					move_dir = diff.normalized()
 
 	if move_dir.length_squared() > 0.01:
+		var prev_player_pos := player_root.position
 		move_dir = move_dir.normalized()
 		player_target_rotation = atan2(move_dir.x, move_dir.z)
 
@@ -2187,9 +2194,14 @@ func _handle_player_movement(delta: float) -> void:
 			if player_anim.current_animation != "Run":
 				player_anim.play("Run")
 
-		# Spawn fading footstep decals
-		footstep_mgr.spawn_footstep_if_needed(level_root, player_root.position, player_target_rotation)
+		# Spawn fading footstep decals and sound only when actually moving
+		if player_root.position.distance_to(prev_player_pos) > 0.005:
+			footstep_mgr.spawn_footstep_if_needed(level_root, player_root.position, player_target_rotation)
+		elif SoundManager != null:
+			SoundManager.stop_footstep()
 	else:
+		if SoundManager != null:
+			SoundManager.stop_footstep()
 		if is_instance_valid(player_anim) and player_anim.has_animation("Idle"):
 			if player_anim.current_animation != "Idle":
 				player_anim.play("Idle")
@@ -2234,6 +2246,7 @@ func _trigger_fail(reason: String) -> void:
 	_reset_mobile_touch()
 
 	if SoundManager != null:
+		SoundManager.stop_footstep()
 		SoundManager.play_sfx("catch")
 	if SignalHub != null:
 		SignalHub.emit_level_failed(current_level, reason)
@@ -2300,15 +2313,15 @@ func _trigger_fail(reason: String) -> void:
 			var side := Vector3(-diff.z, 0.0, diff.x).normalized()
 			face_offset = side * 0.75
 
-		var target_cam_pos := focus_target + Vector3(0.0, 2.3, 3.4) + face_offset
-		var target_cam_rot := Vector3(-20.0, 0.0, 0.0)
+		var target_cam_pos := focus_target + Vector3(0.0, 7.2, 4.4) + face_offset * 0.5
+		var target_cam_rot := Vector3(-58.0, 0.0, 0.0)
 
 		if is_instance_valid(catch_cinematic_tween):
 			catch_cinematic_tween.kill()
 		catch_cinematic_tween = create_tween().set_parallel(true)
 		catch_cinematic_tween.tween_property(main_camera, "position", target_cam_pos, 0.55).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 		catch_cinematic_tween.tween_property(main_camera, "rotation_degrees", target_cam_rot, 0.55).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-		catch_cinematic_tween.tween_property(main_camera, "fov", 42.0, 0.55).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		catch_cinematic_tween.tween_property(main_camera, "fov", 40.0, 0.55).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 		# Impact camera punch
 		get_tree().create_timer(0.26).timeout.connect(func():
@@ -2474,9 +2487,12 @@ func _setup_hud() -> void:
 	coin_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	coin_panel.add_child(coin_box)
 
-	var coin_icon := Label.new()
-	coin_icon.text = "🪙"
-	coin_icon.add_theme_font_size_override("font_size", 20)
+	var coin_icon := TextureRect.new()
+	coin_icon.texture = _load_ui_texture("res://assets/ui/reward-coin.png")
+	coin_icon.custom_minimum_size = Vector2(26, 26)
+	coin_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	coin_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	coin_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	coin_box.add_child(coin_icon)
 
 	coin_lbl = Label.new()
@@ -2486,6 +2502,55 @@ func _setup_hud() -> void:
 	coin_lbl.add_theme_font_size_override("font_size", 20)
 	coin_lbl.add_theme_color_override("font_color", Color("#2d3436"))
 	coin_box.add_child(coin_lbl)
+
+	# 2b. Compact "Get Coins" Rewarded Ad Button right under Coin Pill
+	var get_coins_btn := Button.new()
+	get_coins_btn.name = "GetCoinsAdButton"
+	get_coins_btn.text = "🎬 +30 COINS"
+	get_coins_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	get_coins_btn.offset_left = -175.0
+	get_coins_btn.offset_top = 76.0
+	get_coins_btn.offset_right = -25.0
+	get_coins_btn.offset_bottom = 110.0
+	var gc_style := StyleBoxFlat.new()
+	gc_style.bg_color = Color("#f39c12")
+	gc_style.border_color = Color("#d35400")
+	gc_style.border_width_bottom = 3
+	gc_style.set_corner_radius_all(16)
+	get_coins_btn.add_theme_stylebox_override("normal", gc_style)
+	var gc_hover := gc_style.duplicate() as StyleBoxFlat
+	gc_hover.bg_color = Color("#f1c40f")
+	get_coins_btn.add_theme_stylebox_override("hover", gc_hover)
+	get_coins_btn.add_theme_stylebox_override("pressed", gc_hover)
+	if game_title_font != null:
+		get_coins_btn.add_theme_font_override("font", game_title_font)
+	get_coins_btn.add_theme_font_size_override("font_size", 15)
+	get_coins_btn.add_theme_color_override("font_color", Color.WHITE)
+	get_coins_btn.add_theme_color_override("font_outline_color", Color("#7f4f00"))
+	get_coins_btn.add_theme_constant_override("outline_size", 4)
+	get_coins_btn.pressed.connect(func():
+		var ad_mgr = AdManager if AdManager != null else get_tree().root.get_node_or_null("AdManager")
+		if ad_mgr != null and ad_mgr.has_method("show_rewarded"):
+			get_coins_btn.disabled = true
+			get_coins_btn.text = "🎬 LOADING..."
+			ad_mgr.show_rewarded(func(amt, _type):
+				if GameManager != null:
+					GameManager.coins += amt
+					GameManager.save_game_state()
+					coins = GameManager.coins
+				else:
+					coins += amt
+				if is_instance_valid(coin_lbl):
+					coin_lbl.text = " %d" % coins
+				if SignalHub != null:
+					SignalHub.emit_coins_changed(coins)
+				if SoundManager != null:
+					SoundManager.play_sfx("coin")
+				get_coins_btn.text = "🎬 +30 COINS"
+				get_coins_btn.disabled = false
+			)
+	)
+	hud_root.add_child(get_coins_btn)
 
 	# 4. Item Collector Widget at Top Center directly under Level (Clean, Stylish Capsule Pill)
 	item_collector_panel = PanelContainer.new()
@@ -2555,9 +2620,9 @@ func _setup_hud() -> void:
 	tray_box.add_theme_constant_override("separation", 24)
 	tray.add_child(tray_box)
 
-	speed_badge_lbl = _add_interactive_powerup_item(tray_box, "res://assets/ui/powerup_speed_lightning.svg", "", "🪙 %d" % POWERUP_COIN_COST, Color("#f39c12"), _activate_speed_powerup, speed_btn_refs)
-	shield_badge_lbl = _add_interactive_powerup_item(tray_box, "res://assets/ui/powerup_invis_white_ball.svg", "", "🪙 %d" % POWERUP_COIN_COST, Color("#00cec9"), _activate_invisibility_powerup, shield_btn_refs)
-	ghost_badge_lbl = _add_interactive_powerup_item(tray_box, "res://assets/ui/powerup_bypass_wall.svg", "", "🪙 %d" % POWERUP_COIN_COST, Color("#e67e22"), _activate_wall_pass_powerup, ghost_btn_refs)
+	speed_badge_lbl = _add_interactive_powerup_item(tray_box, "res://assets/ui/powerup_speed_lightning.svg", "", "%d" % POWERUP_COIN_COST, Color("#f39c12"), _activate_speed_powerup, speed_btn_refs)
+	shield_badge_lbl = _add_interactive_powerup_item(tray_box, "res://assets/ui/powerup_invis_white_ball.svg", "", "%d" % POWERUP_COIN_COST, Color("#00cec9"), _activate_invisibility_powerup, shield_btn_refs)
+	ghost_badge_lbl = _add_interactive_powerup_item(tray_box, "res://assets/ui/powerup_bypass_wall.svg", "", "%d" % POWERUP_COIN_COST, Color("#e67e22"), _activate_wall_pass_powerup, ghost_btn_refs)
 	_update_powerup_locks()
 
 	# 4. Floating Mobile Virtual Joystick
@@ -2633,16 +2698,16 @@ func _add_interactive_powerup_item(parent: HBoxContainer, svg_path: String, _pow
 	lock_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	btn.add_child(lock_overlay)
 
-	# Bottom count or lock badge (Only powerup icon with count or lock, transparent background)
+	# Bottom count or lock badge (crisp number/status, no unsupported emoji glyphs)
 	var badge := Panel.new()
-	badge.custom_minimum_size = Vector2(76, 22)
-	badge.size = Vector2(76, 22)
-	badge.position = Vector2(8, 64)
+	badge.custom_minimum_size = Vector2(84, 26)
+	badge.size = Vector2(84, 26)
+	badge.position = Vector2(4, 62)
 	var b_style := StyleBoxFlat.new()
 	b_style.bg_color = badge_col
-	b_style.set_corner_radius_all(11)
+	b_style.set_corner_radius_all(12)
 	b_style.border_color = Color.WHITE
-	b_style.set_border_width_all(1)
+	b_style.set_border_width_all(2)
 	badge.add_theme_stylebox_override("panel", b_style)
 	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	btn.add_child(badge)
@@ -2654,10 +2719,10 @@ func _add_interactive_powerup_item(parent: HBoxContainer, svg_path: String, _pow
 	b_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	if game_title_font != null:
 		b_lbl.add_theme_font_override("font", game_title_font)
-	b_lbl.add_theme_font_size_override("font_size", 13)
+	b_lbl.add_theme_font_size_override("font_size", 16)
 	b_lbl.add_theme_color_override("font_color", Color.WHITE)
 	b_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
-	b_lbl.add_theme_constant_override("outline_size", 3)
+	b_lbl.add_theme_constant_override("outline_size", 4)
 	b_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	badge.add_child(b_lbl)
 
@@ -2689,7 +2754,7 @@ func _apply_powerup_lock_visual(refs: Dictionary, is_locked: bool, unlock_lvl: i
 	if b_style != null:
 		b_style.bg_color = Color("#576574") if is_locked else unlocked_col
 	if is_instance_valid(b_lbl):
-		b_lbl.text = ("🔒 LV %d" % unlock_lvl) if is_locked else ("🪙 %d" % POWERUP_COIN_COST)
+		b_lbl.text = ("LV %d" % unlock_lvl) if is_locked else ("%d" % POWERUP_COIN_COST)
 
 func _update_powerup_locks() -> void:
 	var speed_locked := not GameManager.is_powerup_unlocked("speed", current_level) if GameManager != null else (current_level < SPEED_UNLOCK_LEVEL)
@@ -2888,14 +2953,17 @@ func _has_enough_powerup_coins() -> bool:
 	return current_coins >= POWERUP_COIN_COST
 
 func _spend_powerup_coins() -> bool:
+	return _spend_coins(POWERUP_COIN_COST)
+
+func _spend_coins(amount: int) -> bool:
 	if GameManager != null:
-		if not GameManager.try_spend_coins(POWERUP_COIN_COST):
+		if not GameManager.try_spend_coins(amount):
 			return false
 		coins = GameManager.coins
 	else:
-		if coins < POWERUP_COIN_COST:
+		if coins < amount:
 			return false
-		coins -= POWERUP_COIN_COST
+		coins -= amount
 
 	if is_instance_valid(coin_lbl):
 		coin_lbl.text = " %d" % coins
@@ -3134,9 +3202,11 @@ func _set_player_transparency(alpha: float, rim_col: Color = Color.TRANSPARENT) 
 					mat.emission = rim_col
 					mat.emission_energy_multiplier = 0.9
 				else:
-					mat.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED
+					mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 					mat.albedo_color.a = 1.0
-					mat.emission_enabled = false
+					mat.emission_enabled = true
+					mat.emission = Color.BLACK
+					mat.emission_energy_multiplier = 0.0
 	if is_instance_valid(player_ring):
 		var r_mat := player_ring.material_override as StandardMaterial3D
 		if r_mat:
@@ -3183,54 +3253,57 @@ func _show_powerup_toast(text: String, col: Color) -> void:
 	tw.tween_property(toast, "modulate:a", 0.0, 0.4)
 	tw.tween_callback(toast.queue_free)
 
+func _set_powerup_active_visual(refs: Dictionary, is_active: bool, time_left: float, idle_text: String, is_locked: bool = false) -> void:
+	var b_lbl: Label = refs.get("badge_lbl")
+	var b_style: StyleBoxFlat = refs.get("badge_style")
+	var bg_style: StyleBoxFlat = refs.get("btn_bg_style")
+	var unlocked_col: Color = refs.get("unlocked_col", Color("#f39c12"))
+	if is_instance_valid(b_lbl):
+		var target_txt := ("%.1fs" % time_left) if is_active else idle_text
+		if b_lbl.text != target_txt:
+			b_lbl.text = target_txt
+	if b_style != null:
+		b_style.bg_color = Color("#2ecc71") if is_active else (Color("#576574") if is_locked else unlocked_col)
+	if bg_style != null:
+		bg_style.border_color = Color("#2ecc71") if is_active else (Color("#576574") if is_locked else unlocked_col)
+		bg_style.set_border_width_all(4 if is_active else 2)
+		bg_style.bg_color = Color(0.14, 0.34, 0.22, 0.78) if is_active else Color(0.10, 0.14, 0.22, 0.55)
+
 func _update_powerups(delta: float) -> void:
-	var cost_txt := "🪙 %d" % POWERUP_COIN_COST
-	var invis_idle_txt := ("🔒 LV %d" % INVIS_UNLOCK_LEVEL) if current_level < INVIS_UNLOCK_LEVEL else cost_txt
-	var wall_idle_txt := ("🔒 LV %d" % BYPASS_WALL_UNLOCK_LEVEL) if current_level < BYPASS_WALL_UNLOCK_LEVEL else cost_txt
+	var cost_txt := "%d" % POWERUP_COIN_COST
+	var invis_locked := not GameManager.is_powerup_unlocked("invisible", current_level) if GameManager != null else (current_level < INVIS_UNLOCK_LEVEL)
+	var wall_locked := not GameManager.is_powerup_unlocked("bypass_wall", current_level) if GameManager != null else (current_level < BYPASS_WALL_UNLOCK_LEVEL)
+	var invis_idle_txt := ("LV %d" % INVIS_UNLOCK_LEVEL) if invis_locked else cost_txt
+	var wall_idle_txt := ("LV %d" % BYPASS_WALL_UNLOCK_LEVEL) if wall_locked else cost_txt
 
 	if speed_boost_time > 0.0:
 		speed_boost_time = maxf(0.0, speed_boost_time - delta)
-		if is_instance_valid(speed_badge_lbl):
-			speed_badge_lbl.text = "%.1fs" % speed_boost_time
-		if speed_boost_time == 0.0:
-			if is_instance_valid(speed_badge_lbl):
-				speed_badge_lbl.text = cost_txt
-	elif is_instance_valid(speed_badge_lbl) and speed_badge_lbl.text != cost_txt:
-		speed_badge_lbl.text = cost_txt
+	_set_powerup_active_visual(speed_btn_refs, speed_boost_time > 0.0, speed_boost_time, cost_txt, false)
 
 	if invisibility_time > 0.0:
 		invisibility_time = maxf(0.0, invisibility_time - delta)
-		if is_instance_valid(shield_badge_lbl):
-			shield_badge_lbl.text = "%.1fs" % invisibility_time
 		if invisibility_time == 0.0:
 			is_player_invisible = false
 			if not is_wall_pass_active:
 				_set_player_transparency(1.0)
-			if is_instance_valid(shield_badge_lbl):
-				shield_badge_lbl.text = invis_idle_txt
 			_show_powerup_toast("VISIBLE AGAIN!", Color("#e74c3c"))
-	elif is_instance_valid(shield_badge_lbl) and shield_badge_lbl.text != invis_idle_txt:
-		shield_badge_lbl.text = invis_idle_txt
+	_set_powerup_active_visual(shield_btn_refs, invisibility_time > 0.0, invisibility_time, invis_idle_txt, invis_locked)
 
 	if wall_pass_time > 0.0:
 		wall_pass_time = maxf(0.0, wall_pass_time - delta)
-		if is_instance_valid(ghost_badge_lbl):
-			ghost_badge_lbl.text = "%.1fs" % wall_pass_time
 		if wall_pass_time == 0.0:
 			is_wall_pass_active = false
 			if is_instance_valid(player_root):
 				player_root.position = _find_nearest_safe_floor(player_root.position, 0.35)
 			if not is_player_invisible:
 				_set_player_transparency(1.0)
-			if is_instance_valid(ghost_badge_lbl):
-				ghost_badge_lbl.text = wall_idle_txt
 			_show_powerup_toast("BYPASS WALL ENDED!", Color("#e67e22"))
-	elif is_instance_valid(ghost_badge_lbl) and ghost_badge_lbl.text != wall_idle_txt:
-		ghost_badge_lbl.text = wall_idle_txt
+	_set_powerup_active_visual(ghost_btn_refs, wall_pass_time > 0.0, wall_pass_time, wall_idle_txt, wall_locked)
 
 func _show_victory_popup() -> void:
 	if is_instance_valid(victory_popup) or not is_instance_valid(hud_root):
 		return
+	_set_ad_banner_mode(false)
 
 	var scene := load("res://scenes/popups/victory_popup.tscn") as PackedScene
 	if scene != null:
@@ -3252,27 +3325,19 @@ func _animate_flying_coins(from_pos: Vector2, to_pos: Vector2, total_amount: int
 		get_tree().create_timer(delay).timeout.connect(func():
 			if not is_instance_valid(hud_root):
 				return
-			var coin_item := PanelContainer.new()
-			coin_item.custom_minimum_size = Vector2(34, 34)
-			var c_style := StyleBoxFlat.new()
-			c_style.bg_color = Color("#f1c40f")
-			c_style.border_color = Color("#d35400")
-			c_style.set_border_width_all(2)
-			c_style.set_corner_radius_all(17)
-			coin_item.add_theme_stylebox_override("panel", c_style)
+			var coin_item := TextureRect.new()
+			coin_item.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			coin_item.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			coin_item.texture = _load_ui_texture("res://assets/ui/reward-coin.png")
+			coin_item.custom_minimum_size = Vector2(38, 38)
+			coin_item.size = Vector2(38, 38)
 			coin_item.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
-			var c_lbl := Label.new()
-			c_lbl.text = "🪙"
-			c_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			c_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-			c_lbl.add_theme_font_size_override("font_size", 20)
-			coin_item.add_child(c_lbl)
-
-			var start_p := from_pos + Vector2(randf_range(-25, 25), randf_range(-12, 12))
-			coin_item.position = start_p - Vector2(17, 17)
-			coin_item.pivot_offset = Vector2(17, 17)
+			var start_p := from_pos + Vector2(randf_range(-20, 20), randf_range(-10, 10))
+			coin_item.position = start_p - Vector2(19, 19)
+			coin_item.pivot_offset = Vector2(19, 19)
 			hud_root.add_child(coin_item)
+			coin_item.size = Vector2(38, 38)
 
 			# Curved trajectory arc staying cleanly inside screen view
 			var mid_x := lerpf(start_p.x, to_pos.x, randf_range(0.35, 0.65)) + randf_range(-40, 40)
@@ -3280,9 +3345,9 @@ func _animate_flying_coins(from_pos: Vector2, to_pos: Vector2, total_amount: int
 			var mid_p := Vector2(mid_x, mid_y)
 
 			var tw := create_tween()
-			tw.tween_property(coin_item, "scale", Vector2(1.3, 1.3), 0.1).set_trans(Tween.TRANS_QUAD)
-			tw.tween_property(coin_item, "position", mid_p - Vector2(17, 17), 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-			tw.tween_property(coin_item, "position", to_pos - Vector2(17, 17), 0.32).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+			tw.tween_property(coin_item, "scale", Vector2(1.08, 1.08), 0.1).set_trans(Tween.TRANS_QUAD)
+			tw.tween_property(coin_item, "position", mid_p - Vector2(19, 19), 0.28).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			tw.tween_property(coin_item, "position", to_pos - Vector2(19, 19), 0.32).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 			tw.parallel().tween_property(coin_item, "scale", Vector2(0.85, 0.85), 0.32)
 
 			tw.tween_callback(func():
@@ -3316,29 +3381,43 @@ func _on_continue_pressed() -> void:
 	else:
 		levels_completed_streak += 1
 
-	# Show Interstitial Ad (every 2 completed levels)
-	var ad_mgr = get_tree().root.get_node_or_null("AdManager")
-	if ad_mgr != null and ad_mgr.has_method("on_level_finished_check_interstitial"):
-		ad_mgr.on_level_finished_check_interstitial()
+	# Show Interstitial Ad at level end
+	_show_level_end_interstitial()
 
 	current_level += 1
 	# Unlimited levels progression: loads static JSONs (1..5) then seamlessly shifts into procedural generation (6, 7, 8... 100+)
 	load_level(current_level)
 
+const CONTINUE_COIN_COST := 20
+const CONTINUE_INVISIBILITY_DURATION := 5.0
+
+func _set_ad_banner_mode(gameplay_only: bool) -> void:
+	var ad_mgr = AdManager if AdManager != null else get_tree().root.get_node_or_null("AdManager")
+	if ad_mgr == null:
+		return
+	if gameplay_only:
+		if ad_mgr.has_method("show_gameplay_banner"):
+			ad_mgr.show_gameplay_banner()
+	elif ad_mgr.has_method("show_banner"):
+		ad_mgr.show_banner()
+
 func _show_fail_popup(reason: String) -> void:
 	if is_instance_valid(fail_popup) or not is_instance_valid(hud_root):
 		return
+	if SoundManager != null:
+		SoundManager.stop_footstep()
+	_set_ad_banner_mode(false)
 
 	var scene := load("res://scenes/popups/fail_popup.tscn") as PackedScene
 	if scene != null:
 		fail_popup = scene.instantiate()
-		fail_popup.setup(reason if not reason.is_empty() else "YOU WERE CAUGHT BY GRANNY!", "💡 TIP: Sneak past Granny when she looks away, or use Invisibility to recover your items!", "res://assets/ui/boy_crying_fail.png")
+		var available_coins := GameManager.coins if GameManager != null else coins
+		fail_popup.setup(reason if not reason.is_empty() else "YOU WERE CAUGHT BY GRANNY!", "💡 TIP: Sneak past Granny when she looks away, or use Invisibility to recover your items!", "res://assets/ui/boy_crying_fail.png", CONTINUE_COIN_COST, available_coins)
 		fail_popup.retry_pressed.connect(_on_retry_pressed)
+		fail_popup.continue_pressed.connect(_on_fail_continue_pressed)
 		hud_root.add_child(fail_popup)
 
-func _on_retry_pressed() -> void:
-	if SoundManager != null:
-		SoundManager.play_sfx("button")
+func _cleanup_fail_overlay() -> void:
 	if is_instance_valid(fail_popup):
 		fail_popup.queue_free()
 		fail_popup = null
@@ -3354,6 +3433,56 @@ func _on_retry_pressed() -> void:
 	is_catch_cinematic_active = false
 	is_spotted = false
 	is_level_cleared = false
+
+func _reset_camera_to_origin(reset_position: bool = true) -> void:
+	if not is_instance_valid(main_camera):
+		return
+	if reset_position:
+		main_camera.position = Vector3(player_spawn_pos.x * 0.75, 27.5, player_spawn_pos.z + 4.5)
+	main_camera.rotation_degrees = Vector3(-68.0, 0.0, 0.0)
+	main_camera.fov = 46.0
+
+func _on_fail_continue_pressed() -> void:
+	if not _spend_coins(CONTINUE_COIN_COST):
+		return
+	if SoundManager != null:
+		SoundManager.play_sfx("powerup")
+		SoundManager.start_bgm()
+	_cleanup_fail_overlay()
+	_set_ad_banner_mode(true)
+	if is_instance_valid(main_camera):
+		var target_pos := Vector3(
+			(player_root.position.x if is_instance_valid(player_root) else player_spawn_pos.x) * 0.75,
+			27.5,
+			(player_root.position.z if is_instance_valid(player_root) else player_spawn_pos.z) + 4.5
+		)
+		var resume_tw := create_tween().set_parallel(true)
+		resume_tw.tween_property(main_camera, "position", target_pos, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		resume_tw.tween_property(main_camera, "rotation_degrees", Vector3(-68.0, 0.0, 0.0), 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		resume_tw.tween_property(main_camera, "fov", 46.0, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+	for g in active_guards:
+		if is_instance_valid(g) and g.has_method("resume_after_continue"):
+			g.resume_after_continue()
+
+	is_player_invisible = true
+	invisibility_time = maxf(invisibility_time, CONTINUE_INVISIBILITY_DURATION)
+	_set_player_transparency(0.42)
+	_update_hud_objective("👻 REVIVED! INVISIBLE FOR 5s!")
+
+func _show_level_end_interstitial() -> void:
+	var ad_mgr = AdManager if AdManager != null else get_tree().root.get_node_or_null("AdManager")
+	if ad_mgr != null and ad_mgr.has_method("on_level_finished_check_interstitial"):
+		ad_mgr.on_level_finished_check_interstitial(true)
+
+func _on_retry_pressed() -> void:
+	if SoundManager != null:
+		SoundManager.play_sfx("button")
+	_cleanup_fail_overlay()
+	_show_level_end_interstitial()
+	if is_instance_valid(intro_cinematic_tween):
+		intro_cinematic_tween.kill()
+	_reset_camera_to_origin(true)
 	candy_collected = false
 	# If level restarted, Granny is NOT intelligent and streak resets to 0
 	is_intelligent_granny_active = false

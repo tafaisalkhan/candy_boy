@@ -2,13 +2,17 @@ class_name FailPopup
 extends Control
 
 signal retry_pressed
+signal continue_pressed
 
 @export var reason_text: String = "YOU WERE SPOTTED BY THE GUARD!"
 @export var tip_text: String = "💡 TIP: Sneak when guards turn away or use Invisibility!"
 @export var boy_crying_image_path: String = "res://assets/ui/boy_crying_fail.png"
+@export var continue_coin_cost: int = 20
 
 var game_title_font: Font = null
 var game_body_font: Font = null
+var current_coins: int = -1
+var continue_btn: Button = null
 
 func _ready() -> void:
 	_init_fonts()
@@ -25,13 +29,33 @@ func _init_fonts() -> void:
 	else:
 		game_body_font = game_title_font
 
-func setup(p_reason: String = "", p_tip: String = "", p_image_path: String = "") -> void:
+func setup(p_reason: String = "", p_tip: String = "", p_image_path: String = "", p_continue_cost: int = -1, p_current_coins: int = -1) -> void:
 	if not p_reason.is_empty():
 		reason_text = p_reason
 	if not p_tip.is_empty():
 		tip_text = p_tip
 	if not p_image_path.is_empty():
 		boy_crying_image_path = p_image_path
+	if p_continue_cost > 0:
+		continue_coin_cost = p_continue_cost
+	if p_current_coins >= 0:
+		current_coins = p_current_coins
+	_refresh_continue_button()
+
+func _get_available_coins() -> int:
+	if GameManager != null:
+		return GameManager.coins
+	return maxi(0, current_coins)
+
+func _refresh_continue_button() -> void:
+	if not is_instance_valid(continue_btn):
+		return
+	var can_afford := _get_available_coins() >= continue_coin_cost
+	continue_btn.disabled = not can_afford
+	if can_afford:
+		continue_btn.text = "👻 CONTINUE (%d COINS 🪙)" % continue_coin_cost
+	else:
+		continue_btn.text = "🔒 CONTINUE (%d COINS 🪙)" % continue_coin_cost
 
 func _load_texture(path: String) -> Texture2D:
 	if ResourceLoader.exists(path):
@@ -50,16 +74,16 @@ func _build_ui() -> void:
 	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(backdrop)
 
-	# 2. Main Fail Card Dialog
+	# 2. Centered Container so the fail card never overflows off-screen
+	var center_wrap := CenterContainer.new()
+	center_wrap.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center_wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(center_wrap)
+
 	var card := PanelContainer.new()
 	card.name = "FailCard"
-	card.custom_minimum_size = Vector2(780, 800)
-	card.set_anchors_preset(Control.PRESET_CENTER)
-	card.pivot_offset = Vector2(390, 400)
-	card.offset_left = -390
-	card.offset_top = -400
-	card.offset_right = 390
-	card.offset_bottom = 400
+	card.custom_minimum_size = Vector2(680, 0)
+	card.pivot_offset = Vector2(340, 380)
 
 	var card_style := StyleBoxFlat.new()
 	card_style.bg_color = Color("#231518")
@@ -69,17 +93,24 @@ func _build_ui() -> void:
 	card_style.shadow_color = Color(0, 0, 0, 0.75)
 	card_style.shadow_size = 35
 	card.add_theme_stylebox_override("panel", card_style)
-	add_child(card)
+	center_wrap.add_child(card)
+
+	var card_margin := MarginContainer.new()
+	card_margin.add_theme_constant_override("margin_left", 24)
+	card_margin.add_theme_constant_override("margin_top", 22)
+	card_margin.add_theme_constant_override("margin_right", 24)
+	card_margin.add_theme_constant_override("margin_bottom", 24)
+	card.add_child(card_margin)
 
 	var v_box := VBoxContainer.new()
 	v_box.alignment = BoxContainer.ALIGNMENT_CENTER
-	v_box.add_theme_constant_override("separation", 14)
-	card.add_child(v_box)
+	v_box.add_theme_constant_override("separation", 12)
+	card_margin.add_child(v_box)
 
 	# 3D Crimson Ribbon Header Banner
 	var banner_box := Panel.new()
-	banner_box.custom_minimum_size = Vector2(580, 88)
-	banner_box.size = Vector2(580, 88)
+	banner_box.custom_minimum_size = Vector2(520, 78)
+	banner_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var b_trans := StyleBoxEmpty.new()
 	banner_box.add_theme_stylebox_override("panel", b_trans)
 	v_box.add_child(banner_box)
@@ -123,9 +154,11 @@ func _build_ui() -> void:
 	var sub_lbl := Label.new()
 	sub_lbl.text = reason_text.to_upper()
 	sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sub_lbl.custom_minimum_size = Vector2(580, 0)
 	if game_body_font != null:
 		sub_lbl.add_theme_font_override("font", game_body_font)
-	sub_lbl.add_theme_font_size_override("font_size", 24)
+	sub_lbl.add_theme_font_size_override("font_size", 22)
 	sub_lbl.add_theme_color_override("font_color", Color("#fab1a0"))
 	sub_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
 	sub_lbl.add_theme_constant_override("outline_size", 8)
@@ -133,7 +166,8 @@ func _build_ui() -> void:
 
 	# Boy Picture Frame (Crying boy)
 	var img_frame := PanelContainer.new()
-	img_frame.custom_minimum_size = Vector2(660, 320)
+	img_frame.custom_minimum_size = Vector2(580, 260)
+	img_frame.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var f_style := StyleBoxFlat.new()
 	f_style.bg_color = Color("#1a080a")
 	f_style.set_corner_radius_all(22)
@@ -155,7 +189,8 @@ func _build_ui() -> void:
 
 	# Tip Banner Box Container
 	var tip_box := PanelContainer.new()
-	tip_box.custom_minimum_size = Vector2(640, 76)
+	tip_box.custom_minimum_size = Vector2(580, 68)
+	tip_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var t_style := StyleBoxFlat.new()
 	t_style.bg_color = Color("#2d181c")
 	t_style.border_color = Color("#962d00")
@@ -164,20 +199,74 @@ func _build_ui() -> void:
 	tip_box.add_theme_stylebox_override("panel", t_style)
 	v_box.add_child(tip_box)
 
+	var tip_margin := MarginContainer.new()
+	tip_margin.add_theme_constant_override("margin_left", 14)
+	tip_margin.add_theme_constant_override("margin_top", 8)
+	tip_margin.add_theme_constant_override("margin_right", 14)
+	tip_margin.add_theme_constant_override("margin_bottom", 8)
+	tip_box.add_child(tip_margin)
+
 	var tip_lbl := Label.new()
 	tip_lbl.text = tip_text
 	tip_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	tip_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	tip_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tip_lbl.custom_minimum_size = Vector2(540, 0)
 	if game_body_font != null:
 		tip_lbl.add_theme_font_override("font", game_body_font)
-	tip_lbl.add_theme_font_size_override("font_size", 22)
+	tip_lbl.add_theme_font_size_override("font_size", 20)
 	tip_lbl.add_theme_color_override("font_color", Color("#ffeaa7"))
-	tip_box.add_child(tip_lbl)
+	tip_margin.add_child(tip_lbl)
+
+	# Tactile 3D Continue with Coins Button (Revive + Temporary Invisibility)
+	continue_btn = Button.new()
+	continue_btn.custom_minimum_size = Vector2(520, 70)
+	continue_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var cont_style := StyleBoxFlat.new()
+	cont_style.bg_color = Color("#2ecc71")
+	cont_style.border_color = Color("#1e8449")
+	cont_style.border_width_bottom = 6
+	cont_style.border_width_left = 3
+	cont_style.border_width_right = 3
+	cont_style.border_width_top = 2
+	cont_style.set_corner_radius_all(24)
+	cont_style.shadow_color = Color(0, 0, 0, 0.35)
+	cont_style.shadow_size = 6
+
+	var cont_hover := cont_style.duplicate() as StyleBoxFlat
+	cont_hover.bg_color = Color("#58d68d")
+
+	var cont_press := cont_style.duplicate() as StyleBoxFlat
+	cont_press.bg_color = Color("#27ae60")
+	cont_press.border_width_bottom = 2
+	cont_press.border_width_top = 6
+
+	var cont_disabled := cont_style.duplicate() as StyleBoxFlat
+	cont_disabled.bg_color = Color("#5d6d7e")
+	cont_disabled.border_color = Color("#34495e")
+
+	continue_btn.add_theme_stylebox_override("normal", cont_style)
+	continue_btn.add_theme_stylebox_override("hover", cont_hover)
+	continue_btn.add_theme_stylebox_override("pressed", cont_press)
+	continue_btn.add_theme_stylebox_override("disabled", cont_disabled)
+	if game_title_font != null:
+		continue_btn.add_theme_font_override("font", game_title_font)
+	continue_btn.add_theme_font_size_override("font_size", 30)
+	continue_btn.add_theme_color_override("font_color", Color.WHITE)
+	continue_btn.add_theme_color_override("font_disabled_color", Color("#d5dbdb"))
+	continue_btn.add_theme_color_override("font_outline_color", Color("#145a32"))
+	continue_btn.add_theme_constant_override("outline_size", 8)
+	continue_btn.pressed.connect(func():
+		continue_pressed.emit()
+	)
+	v_box.add_child(continue_btn)
+	_refresh_continue_button()
 
 	# Rewarded Video Ad Button (Watch for Bonus Coins)
 	var ad_btn := Button.new()
 	ad_btn.text = "🎬 WATCH AD (+30 COINS 🪙)"
-	ad_btn.custom_minimum_size = Vector2(580, 80)
+	ad_btn.custom_minimum_size = Vector2(520, 62)
+	ad_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var ad_style := StyleBoxFlat.new()
 	ad_style.bg_color = Color("#f39c12")
 	ad_style.border_color = Color("#d35400")
@@ -218,10 +307,13 @@ func _build_ui() -> void:
 				if GameManager != null:
 					GameManager.coins += amt
 					GameManager.save_game_state()
+				else:
+					current_coins = maxi(0, current_coins) + amt
 				if SignalHub != null and GameManager != null:
 					SignalHub.emit_coins_changed(GameManager.coins)
 				if SoundManager != null:
 					SoundManager.play_sfx("coin_sound")
+				_refresh_continue_button()
 			)
 	)
 	v_box.add_child(ad_btn)
@@ -229,7 +321,8 @@ func _build_ui() -> void:
 	# Tactile 3D Try Again Button
 	var retry_btn := Button.new()
 	retry_btn.text = "🔄 TRY AGAIN"
-	retry_btn.custom_minimum_size = Vector2(580, 96)
+	retry_btn.custom_minimum_size = Vector2(520, 68)
+	retry_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var btn_style := StyleBoxFlat.new()
 	btn_style.bg_color = Color("#e74c3c")
 	btn_style.border_color = Color("#80151f")

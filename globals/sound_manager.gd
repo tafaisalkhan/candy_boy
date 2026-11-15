@@ -58,8 +58,7 @@ func _load_audio(res_path: String, make_loop: bool = false) -> AudioStream:
 		elif ext == "wav":
 			var wav := AudioStreamWAV.load_from_file(global_path)
 			if wav != null:
-				if make_loop:
-					wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+				wav.loop_mode = AudioStreamWAV.LOOP_FORWARD if make_loop else AudioStreamWAV.LOOP_DISABLED
 				return wav
 	if ResourceLoader.exists(res_path):
 		var s := load(res_path) as AudioStream
@@ -177,12 +176,14 @@ func play_sfx(event_name: String, pitch: float = 1.0, vol_db: float = -1.5) -> v
 		"cabinet", "door":
 			_play_stream_2d(_streams.get("land"), 1.1, -4.0)
 		"victory", "level_complete":
-			# Instantly pause BGM and play boy_complete_level.mp3!
+			# Instantly pause BGM and stop footsteps, then play boy_complete_level.mp3!
+			stop_footstep()
 			stop_or_duck_bgm(true)
 			_play_stream_2d(_streams.get("boy_complete_level"), 1.0, 0.0)
 			_play_stream_2d(_streams.get("star_sound"), 1.05, -2.0)
 		"fail", "level_fail", "catch":
-			# Instantly pause BGM and play both boy_catch.mp3 and level_fail.mp3!
+			# Instantly pause BGM and stop footsteps, then play boy_catch.mp3 and level_fail.mp3!
+			stop_footstep()
 			stop_or_duck_bgm(true)
 			_play_stream_2d(_streams.get("boy_catch"), 1.0, 0.0)
 			_play_stream_2d(_streams.get("level_fail"), 1.0, 0.0)
@@ -203,3 +204,7 @@ func play_footstep() -> void:
 		_footstep_player.stream = stream
 		_footstep_player.pitch_scale = randf_range(0.92, 1.12)
 		_footstep_player.play()
+
+func stop_footstep() -> void:
+	if is_instance_valid(_footstep_player) and _footstep_player.playing:
+		_footstep_player.stop()

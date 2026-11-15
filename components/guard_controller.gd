@@ -375,6 +375,19 @@ func play_catch_confrontation(p_pos: Vector3) -> void:
 		badge_label_3d.text = "🚨 GOTCHA!"
 		badge_label_3d.modulate = Color(1.0, 0.2, 0.2)
 
+func resume_after_continue() -> void:
+	is_hunting_player = false
+	pause_timer = 0.0
+	escape_timer = 0.0
+	if is_instance_valid(cone_instance):
+		cone_instance.visible = true
+	if is_instance_valid(alert_ring):
+		alert_ring.visible = false
+	if is_instance_valid(badge_label_3d):
+		badge_label_3d.text = "AVOID GRANNY"
+		badge_label_3d.modulate = Color.WHITE
+	_play_anim("Walk")
+
 
 func _render_vision_cone(origin: Vector3, forward: Vector3, v_range: float, half_angle: float, colliders: Array[AABB]) -> void:
 	if cone_mesh == null:
