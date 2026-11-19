@@ -72,6 +72,10 @@ func _get_android_dependencies(platform: EditorExportPlatform, debug: bool) -> P
 		if plugin.has_method("_get_android_dependencies"):
 			dependencies.append_array(plugin._get_android_dependencies(platform, debug))
 
+	dependencies.append("com.google.android.play:app-update:2.1.0")
+	dependencies.append("com.google.android.play:review:2.0.1")
+	dependencies.append("com.android.billingclient:billing:8.0.0")
+
 	return dependencies
 
 

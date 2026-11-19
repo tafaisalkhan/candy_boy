@@ -546,9 +546,19 @@ func request_remove_ads() -> void:
 func restore_purchases() -> void:
 	purchase_state_changed.emit(is_ads_removed, "No previous purchases found on this device.")
 
+func check_in_app_update() -> void:
+	if OS.get_name() == "Android" and Engine.has_singleton("CandyBoyAppPlugin"):
+		Engine.get_singleton("CandyBoyAppPlugin").call("check_in_app_update")
+
 func rate_app() -> void:
-	OS.shell_open(PLAY_STORE_URL)
+	if OS.get_name() == "Android" and Engine.has_singleton("CandyBoyAppPlugin"):
+		Engine.get_singleton("CandyBoyAppPlugin").call("request_in_app_review", PLAY_STORE_URL)
+	else:
+		OS.shell_open(PLAY_STORE_URL)
 
 func share_game() -> void:
 	var share_text := "I'm playing Boy Favorite Collection! Can you sneak past Granny? %s" % PLAY_STORE_URL
-	DisplayServer.clipboard_set(share_text)
+	if OS.get_name() == "Android" and Engine.has_singleton("CandyBoyAppPlugin"):
+		Engine.get_singleton("CandyBoyAppPlugin").call("share_text", share_text)
+	else:
+		DisplayServer.clipboard_set(share_text)

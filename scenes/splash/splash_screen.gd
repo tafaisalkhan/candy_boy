@@ -311,6 +311,9 @@ func _on_loading_finished() -> void:
 	tw.tween_callback(func():
 		if is_instance_valid(play_button):
 			play_button.grab_focus()
+		var ad_mgr_upd = AdManager if AdManager != null else get_tree().root.get_node_or_null("AdManager")
+		if ad_mgr_upd != null and ad_mgr_upd.has_method("check_in_app_update"):
+			ad_mgr_upd.check_in_app_update()
 		if GameManager != null and GameManager.has_entered_gameplay and not GameManager.home_support_shown_this_launch:
 			GameManager.home_support_shown_this_launch = true
 			_show_support_popup()
