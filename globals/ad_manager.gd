@@ -54,6 +54,8 @@ var rewarded_ready: bool = false
 var _banner_view = null
 var _banner_view_top = null
 var _banner_view_bottom = null
+var _top_banner_loaded: bool = false
+var _bottom_banner_loaded: bool = false
 var _banner_cb_top = null
 var _banner_cb_bottom = null
 var _interstitial_ad = null
@@ -116,6 +118,14 @@ func _mark_no_fill(reason: String) -> void:
 		no_fill_this_launch = true
 		push_warning("[AdManager] No-fill active: %s" % reason)
 		hide_banner()
+		if _banner_view_top and _banner_view_top.has_method("destroy"):
+			_banner_view_top.destroy()
+			_banner_view_top = null
+		if _banner_view_bottom and _banner_view_bottom.has_method("destroy"):
+			_banner_view_bottom.destroy()
+			_banner_view_bottom = null
+		_top_banner_loaded = false
+		_bottom_banner_loaded = false
 		no_fill_changed.emit(true)
 	if rewarded_ready:
 		rewarded_ready = false
@@ -183,12 +193,16 @@ func _load_banner() -> void:
 	# 1. Top Banner Ad
 	if _banner_view_top == null:
 		print("[AdManager] Loading TOP banner ad: %s" % _banner_ad_id)
+		_top_banner_loaded = false
 		_banner_view_top = AdView.new(_banner_ad_id, AdSize.BANNER, AdPosition.TOP)
+		if _banner_view_top.has_method("hide"):
+			_banner_view_top.hide()
 		_banner_cb_top = AdListener.new()
 		_banner_cb_top.on_ad_loaded = func():
 			print("[AdManager] TOP Banner ad loaded successfully!")
+			_top_banner_loaded = true
 			banner_loaded.emit()
-			if _show_top_banner and not is_ads_removed and _banner_view_top != null and _banner_view_top.has_method("show"):
+			if _show_top_banner and not is_ads_removed and not no_fill_this_launch and _banner_view_top != null and _banner_view_top.has_method("show"):
 				_banner_view_top.show()
 			elif _banner_view_top != null and _banner_view_top.has_method("hide"):
 				_banner_view_top.hide()
@@ -204,11 +218,15 @@ func _load_banner() -> void:
 	# 2. Bottom Banner Ad
 	if _banner_view_bottom == null:
 		print("[AdManager] Loading BOTTOM banner ad: %s" % _banner_ad_id)
+		_bottom_banner_loaded = false
 		_banner_view_bottom = AdView.new(_banner_ad_id, AdSize.BANNER, AdPosition.BOTTOM)
+		if _banner_view_bottom.has_method("hide"):
+			_banner_view_bottom.hide()
 		_banner_cb_bottom = AdListener.new()
 		_banner_cb_bottom.on_ad_loaded = func():
 			print("[AdManager] BOTTOM Banner ad loaded successfully!")
-			if _show_bottom_banner and not is_ads_removed and _banner_view_bottom != null and _banner_view_bottom.has_method("show"):
+			_bottom_banner_loaded = true
+			if _show_bottom_banner and not is_ads_removed and not no_fill_this_launch and _banner_view_bottom != null and _banner_view_bottom.has_method("show"):
 				_banner_view_bottom.show()
 			elif _banner_view_bottom != null and _banner_view_bottom.has_method("hide"):
 				_banner_view_bottom.hide()
@@ -291,15 +309,15 @@ func _apply_banner_visibility(show_top: bool, show_bottom: bool) -> void:
 			_load_banner()
 
 	if _banner_view_top != null:
-		if show_top and _banner_view_top.has_method("show"):
+		if show_top and _top_banner_loaded and not no_fill_this_launch and not is_ads_removed and _banner_view_top.has_method("show"):
 			_banner_view_top.show()
-		elif not show_top and _banner_view_top.has_method("hide"):
+		elif _banner_view_top.has_method("hide"):
 			_banner_view_top.hide()
 
 	if _banner_view_bottom != null:
-		if show_bottom and _banner_view_bottom.has_method("show"):
+		if show_bottom and _bottom_banner_loaded and not no_fill_this_launch and not is_ads_removed and _banner_view_bottom.has_method("show"):
 			_banner_view_bottom.show()
-		elif not show_bottom and _banner_view_bottom.has_method("hide"):
+		elif _banner_view_bottom.has_method("hide"):
 			_banner_view_bottom.hide()
 
 func _show_mock_desktop_banner(show_top: bool = true, show_bottom: bool = true) -> void:
