@@ -116,6 +116,10 @@ func _get_android_manifest_application_element_contents(
 		)
 		as String
 	)
+	if ResourceLoader.exists("res://admob_secrets.gd"):
+		var secrets = load("res://admob_secrets.gd")
+		if secrets != null and "ADMOB_APP_ID" in secrets and not str(secrets.ADMOB_APP_ID).is_empty():
+			app_id = str(secrets.ADMOB_APP_ID).strip_edges()
 	content.append(
 		"""
 	<meta-data
