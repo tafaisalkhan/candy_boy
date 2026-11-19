@@ -3,6 +3,9 @@ extends Control
 
 signal closed
 signal privacy_policy_requested
+signal main_menu_requested
+
+var show_main_menu_button: bool = false
 
 var game_title_font: Font = null
 var game_body_font: Font = null
@@ -45,13 +48,13 @@ func _build_ui() -> void:
 	# 2. Main Dialog Card (640 width for generous 130px side margins)
 	var card := PanelContainer.new()
 	card.name = "SettingsCard"
-	card.custom_minimum_size = Vector2(640, 780)
+	card.custom_minimum_size = Vector2(640, 980)
 	card.set_anchors_preset(Control.PRESET_CENTER)
-	card.pivot_offset = Vector2(320, 390)
+	card.pivot_offset = Vector2(320, 490)
 	card.offset_left = -320
-	card.offset_top = -390
+	card.offset_top = -490
 	card.offset_right = 320
-	card.offset_bottom = 390
+	card.offset_bottom = 490
 
 	var card_style := StyleBoxFlat.new()
 	card_style.bg_color = Color("#1e272e")
@@ -111,6 +114,57 @@ func _build_ui() -> void:
 	remove_ads_btn.pressed.connect(_on_remove_ads_pressed)
 	v_box.add_child(remove_ads_btn)
 
+	# Coin Shop Button
+	var shop_btn := Button.new()
+	shop_btn.text = "🛍️ COIN SHOP"
+	shop_btn.custom_minimum_size = Vector2(520, 68)
+	_apply_btn_style(shop_btn, Color("#f39c12"), Color("#d35400"), Color("#f1c40f"))
+	shop_btn.pressed.connect(func():
+		var shop_script := load("res://scenes/popups/shop_popup.gd") as Script
+		if shop_script != null:
+			add_child(shop_script.new())
+	)
+	v_box.add_child(shop_btn)
+
+	# Rate, Share & Coffee Row
+	var action_row := HBoxContainer.new()
+	action_row.add_theme_constant_override("separation", 12)
+	action_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	v_box.add_child(action_row)
+
+	var rate_btn := Button.new()
+	rate_btn.text = "⭐ RATE"
+	rate_btn.custom_minimum_size = Vector2(165, 62)
+	_apply_btn_style(rate_btn, Color("#2ecc71"), Color("#1e824c"), Color("#40d47e"))
+	rate_btn.pressed.connect(func():
+		var ad_mgr = get_tree().root.get_node_or_null("AdManager")
+		if ad_mgr != null and ad_mgr.has_method("rate_app"):
+			ad_mgr.rate_app()
+	)
+	action_row.add_child(rate_btn)
+
+	var share_btn := Button.new()
+	share_btn.text = "📤 SHARE"
+	share_btn.custom_minimum_size = Vector2(165, 62)
+	_apply_btn_style(share_btn, Color("#3498db"), Color("#1f618d"), Color("#5dade2"))
+	share_btn.pressed.connect(func():
+		var ad_mgr = get_tree().root.get_node_or_null("AdManager")
+		if ad_mgr != null and ad_mgr.has_method("share_game"):
+			ad_mgr.share_game()
+	)
+	action_row.add_child(share_btn)
+
+	var coffee_btn := Button.new()
+	coffee_btn.text = "☕ $1.99"
+	coffee_btn.custom_minimum_size = Vector2(165, 62)
+	_apply_btn_style(coffee_btn, Color("#e67e22"), Color("#d35400"), Color("#f39c12"))
+	coffee_btn.pressed.connect(func():
+		var ad_mgr = get_tree().root.get_node_or_null("AdManager")
+		if ad_mgr != null and ad_mgr.has_method("request_coffee_purchase"):
+			ad_mgr.request_coffee_purchase()
+	)
+	action_row.add_child(coffee_btn)
+
 	# Privacy Policy Button
 	var privacy_btn := Button.new()
 	privacy_btn.text = "📜 PRIVACY POLICY"
@@ -121,9 +175,22 @@ func _build_ui() -> void:
 	)
 	v_box.add_child(privacy_btn)
 
-	# Close Button
+	if show_main_menu_button:
+		var menu_btn := Button.new()
+		menu_btn.text = "🏠 MAIN MENU"
+		menu_btn.custom_minimum_size = Vector2(520, 68)
+		_apply_btn_style(menu_btn, Color("#8e44ad"), Color("#5b2c6f"), Color("#9b59b6"))
+		menu_btn.pressed.connect(func():
+			if SoundManager != null:
+				SoundManager.play_sfx("button")
+			main_menu_requested.emit()
+			queue_free()
+		)
+		v_box.add_child(menu_btn)
+
+	# Close / Resume Button
 	var close_btn := Button.new()
-	close_btn.text = "✖ CLOSE"
+	close_btn.text = "▶ RESUME" if show_main_menu_button else "✖ CLOSE"
 	close_btn.custom_minimum_size = Vector2(520, 82)
 	_apply_btn_style(close_btn, Color("#e74c3c"), Color("#c0392b"), Color("#ff6b6b"))
 	close_btn.pressed.connect(func():

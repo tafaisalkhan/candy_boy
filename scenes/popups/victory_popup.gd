@@ -2,6 +2,7 @@ class_name VictoryPopup
 extends Control
 
 signal continue_pressed
+signal replay_pressed
 signal reward_coins_ready(from_pos: Vector2, amount: int)
 
 @export var level_number: int = 1
@@ -302,6 +303,8 @@ func _build_ui() -> void:
 			)
 	)
 	v_box.add_child(ad_btn)
+	var ad_mgr_vic = get_tree().root.get_node_or_null("AdManager") if is_inside_tree() else null
+	ad_btn.visible = ad_mgr_vic != null and ad_mgr_vic.has_method("is_rewarded_ready") and ad_mgr_vic.is_rewarded_ready()
 
 	# Tactile 3D Continue Button
 	var cont_btn := Button.new()
@@ -340,6 +343,31 @@ func _build_ui() -> void:
 		continue_pressed.emit()
 	)
 	v_box.add_child(cont_btn)
+
+	# Tactile 3D Replay Button (shown alongside Continue on level complete)
+	var replay_btn := Button.new()
+	replay_btn.text = "🔄 REPLAY"
+	replay_btn.custom_minimum_size = Vector2(520, 66)
+	replay_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var rep_style := StyleBoxFlat.new()
+	rep_style.bg_color = Color("#3498db")
+	rep_style.border_color = Color("#1f618d")
+	rep_style.border_width_bottom = 6
+	rep_style.border_width_left = 3
+	rep_style.border_width_right = 3
+	rep_style.border_width_top = 2
+	rep_style.set_corner_radius_all(24)
+	replay_btn.add_theme_stylebox_override("normal", rep_style)
+	if game_title_font != null:
+		replay_btn.add_theme_font_override("font", game_title_font)
+	replay_btn.add_theme_font_size_override("font_size", 32)
+	replay_btn.add_theme_color_override("font_color", Color.WHITE)
+	replay_btn.add_theme_color_override("font_outline_color", Color("#154360"))
+	replay_btn.add_theme_constant_override("outline_size", 8)
+	replay_btn.pressed.connect(func():
+		replay_pressed.emit()
+	)
+	v_box.add_child(replay_btn)
 
 	# Bouncy entrance animation
 	card.scale = Vector2(0.3, 0.3)

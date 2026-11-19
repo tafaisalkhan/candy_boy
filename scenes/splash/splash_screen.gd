@@ -6,10 +6,13 @@ const SPLASH_BACKGROUND_ICON := "res://assets/ui/game_icon.png"
 
 var play_button: Button = null
 var settings_button: Button = null
+var shop_button: Button = null
 var game_scene: PackedScene = null
 var start_requested: bool = false
 var privacy_popup: Control = null
 var settings_popup: Control = null
+var shop_popup: Control = null
+var support_popup: Control = null
 
 # Loader Controls
 var loader_container: VBoxContainer = null
@@ -217,7 +220,24 @@ func _build_action_buttons_ui(p_font: Font) -> void:
 	play_button.pressed.connect(_start_game)
 	button_container.add_child(play_button)
 
-	# 2. SETTINGS Button
+	# 2. SHOP Button
+	shop_button = Button.new()
+	shop_button.text = "🛍️ COIN SHOP"
+	shop_button.custom_minimum_size = Vector2(0, 70)
+	if p_font != null:
+		shop_button.add_theme_font_override("font", p_font)
+	shop_button.add_theme_font_size_override("font_size", 30)
+	shop_button.add_theme_color_override("font_color", Color.WHITE)
+	shop_button.add_theme_color_override("font_outline_color", Color("#7f4f00"))
+	shop_button.add_theme_constant_override("outline_size", 8)
+	shop_button.add_theme_stylebox_override("normal", _create_3d_btn_style(Color("#f39c12"), Color("#d35400"), 6))
+	shop_button.add_theme_stylebox_override("hover", _create_3d_btn_style(Color("#f1c40f"), Color("#d35400"), 6))
+	shop_button.add_theme_stylebox_override("pressed", _create_3d_btn_style(Color("#e67e22"), Color("#d35400"), 2, 5))
+	shop_button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	shop_button.pressed.connect(_show_shop_popup)
+	button_container.add_child(shop_button)
+
+	# 3. SETTINGS Button
 	settings_button = Button.new()
 	settings_button.text = "⚙️ SETTINGS"
 	settings_button.custom_minimum_size = Vector2(0, 70)
@@ -291,10 +311,35 @@ func _on_loading_finished() -> void:
 	tw.tween_callback(func():
 		if is_instance_valid(play_button):
 			play_button.grab_focus()
-		if GameManager != null and not GameManager.is_privacy_policy_accepted:
-			_show_privacy_policy_popup()
+		if GameManager != null and GameManager.has_entered_gameplay and not GameManager.home_support_shown_this_launch:
+			GameManager.home_support_shown_this_launch = true
+			_show_support_popup()
 	)
 
+
+func _show_shop_popup() -> void:
+	if is_instance_valid(shop_popup):
+		return
+	if SoundManager != null:
+		SoundManager.play_sfx("button")
+	var shop_script := load("res://scenes/popups/shop_popup.gd") as Script
+	if shop_script != null:
+		shop_popup = shop_script.new()
+		shop_popup.closed.connect(func():
+			shop_popup = null
+		)
+		add_child(shop_popup)
+
+func _show_support_popup() -> void:
+	if is_instance_valid(support_popup):
+		return
+	var sup_script := load("res://scenes/popups/support_popup.gd") as Script
+	if sup_script != null:
+		support_popup = sup_script.new()
+		support_popup.closed.connect(func():
+			support_popup = null
+		)
+		add_child(support_popup)
 
 func _show_settings_popup() -> void:
 	if is_instance_valid(settings_popup):
@@ -339,16 +384,7 @@ func _capture_privacy_and_quit() -> void:
 	get_tree().quit()
 
 
-func _start_game(force_start: bool = false) -> void:
-	var all_args := OS.get_cmdline_user_args() + OS.get_cmdline_args()
-	var is_test_run := force_start
-	for a in all_args:
-		if a.begins_with("--test-") or a == "--play" or a.begins_with("--level"):
-			is_test_run = true
-			break
-	if not is_test_run and GameManager != null and not GameManager.is_privacy_policy_accepted:
-		_show_privacy_policy_popup()
-		return
+func _start_game(_force_start: bool = false) -> void:
 	print("SPLASH: starting game...")
 	if SoundManager != null:
 		SoundManager.play_sfx("button")

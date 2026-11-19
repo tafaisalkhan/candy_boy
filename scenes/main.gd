@@ -159,6 +159,7 @@ func _ready() -> void:
 	_setup_hud()
 
 	if GameManager != null:
+		GameManager.has_entered_gameplay = true
 		coins = GameManager.coins
 		if SignalHub != null:
 			SignalHub.coins_changed.connect(_on_coins_changed)
@@ -2465,6 +2466,20 @@ func _setup_hud() -> void:
 	obj_lbl.add_theme_constant_override("outline_size", 8)
 	hud_root.add_child(obj_lbl)
 
+	# 1b. Settings / Pause Icon Button at Top Left
+	var pause_btn := TextureButton.new()
+	pause_btn.name = "PauseButton"
+	pause_btn.texture_normal = _load_ui_texture("res://assets/ui/settings.svg")
+	pause_btn.ignore_texture_size = true
+	pause_btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+	pause_btn.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	pause_btn.offset_left = 24.0
+	pause_btn.offset_top = 22.0
+	pause_btn.offset_right = 76.0
+	pause_btn.offset_bottom = 74.0
+	pause_btn.pressed.connect(_on_pause_pressed)
+	hud_root.add_child(pause_btn)
+
 	# 2. Coin Pill Badge at Top Right (Compact & Consistent)
 	coin_panel = PanelContainer.new()
 	coin_panel.name = "CoinPanel"
@@ -2551,6 +2566,13 @@ func _setup_hud() -> void:
 			)
 	)
 	hud_root.add_child(get_coins_btn)
+	var ad_mgr_hud = AdManager if AdManager != null else get_tree().root.get_node_or_null("AdManager")
+	get_coins_btn.visible = ad_mgr_hud != null and ad_mgr_hud.has_method("is_rewarded_ready") and ad_mgr_hud.is_rewarded_ready()
+	if ad_mgr_hud != null and ad_mgr_hud.has_signal("rewarded_ready_changed"):
+		ad_mgr_hud.rewarded_ready_changed.connect(func(ready: bool):
+			if is_instance_valid(get_coins_btn):
+				get_coins_btn.visible = ready
+		)
 
 	# 4. Item Collector Widget at Top Center directly under Level (Clean, Stylish Capsule Pill)
 	item_collector_panel = PanelContainer.new()
@@ -3079,11 +3101,13 @@ func _show_rewarded_powerup_dialog(powerup_title: String, on_success_activate: C
 		dialog.queue_free()
 	)
 
+	var ad_mgr_pw = AdManager if AdManager != null else get_tree().root.get_node_or_null("AdManager")
+	var pw_ad_ready: bool = ad_mgr_pw != null and ad_mgr_pw.has_method("is_rewarded_ready") and ad_mgr_pw.is_rewarded_ready()
+	watch_btn.visible = pw_ad_ready
 	watch_btn.pressed.connect(func():
 		dialog.queue_free()
-		var ad_mgr = get_tree().root.get_node_or_null("AdManager")
-		if ad_mgr != null and ad_mgr.has_method("show_rewarded"):
-			ad_mgr.show_rewarded(func(amount: int, _type: String):
+		if ad_mgr_pw != null and ad_mgr_pw.has_method("show_rewarded"):
+			ad_mgr_pw.show_rewarded(func(amount: int, _type: String):
 				get_tree().paused = was_paused
 				if GameManager != null:
 					GameManager.add_coins(amount)
@@ -3096,18 +3120,6 @@ func _show_rewarded_powerup_dialog(powerup_title: String, on_success_activate: C
 				if on_success_activate.is_valid():
 					on_success_activate.call()
 			)
-		else:
-			get_tree().paused = was_paused
-			if GameManager != null:
-				GameManager.add_coins(10)
-				coins = GameManager.coins
-			else:
-				coins += 10
-			if is_instance_valid(coin_lbl):
-				coin_lbl.text = " %d" % coins
-			_show_powerup_toast("🎉 +10 COINS! %s ACTIVATED!" % powerup_title, Color("#2ecc71"))
-			if on_success_activate.is_valid():
-				on_success_activate.call()
 	)
 
 func _activate_speed_powerup() -> void:
@@ -3310,6 +3322,7 @@ func _show_victory_popup() -> void:
 		victory_popup = scene.instantiate()
 		victory_popup.setup(current_level, 20, "res://assets/ui/boy_candy_splash_bg.png")
 		victory_popup.continue_pressed.connect(_on_continue_pressed)
+		victory_popup.replay_pressed.connect(_on_victory_replay_pressed)
 		victory_popup.reward_coins_ready.connect(func(from_pos: Vector2, amount: int):
 			var to_pos := coin_panel.get_global_rect().get_center() if is_instance_valid(coin_panel) else Vector2(430.0, 70.0)
 			_animate_flying_coins(from_pos, to_pos, amount)
@@ -3367,6 +3380,15 @@ func _animate_flying_coins(from_pos: Vector2, to_pos: Vector2, total_amount: int
 			)
 		)
 
+func _on_victory_replay_pressed() -> void:
+	if SoundManager != null:
+		SoundManager.play_sfx("button")
+	if is_instance_valid(victory_popup):
+		victory_popup.queue_free()
+		victory_popup = null
+	_show_level_end_interstitial()
+	load_level(current_level)
+
 func _on_continue_pressed() -> void:
 	if SoundManager != null:
 		SoundManager.play_sfx("button")
@@ -3415,6 +3437,7 @@ func _show_fail_popup(reason: String) -> void:
 		fail_popup.setup(reason if not reason.is_empty() else "YOU WERE CAUGHT BY GRANNY!", "💡 TIP: Sneak past Granny when she looks away, or use Invisibility to recover your items!", "res://assets/ui/boy_crying_fail.png", CONTINUE_COIN_COST, available_coins)
 		fail_popup.retry_pressed.connect(_on_retry_pressed)
 		fail_popup.continue_pressed.connect(_on_fail_continue_pressed)
+		fail_popup.home_pressed.connect(_on_fail_home_pressed)
 		hud_root.add_child(fail_popup)
 
 func _cleanup_fail_overlay() -> void:
@@ -3475,7 +3498,42 @@ func _show_level_end_interstitial() -> void:
 	if ad_mgr != null and ad_mgr.has_method("on_level_finished_check_interstitial"):
 		ad_mgr.on_level_finished_check_interstitial(true)
 
+func _on_pause_pressed() -> void:
+	if not is_instance_valid(hud_root):
+		return
+	if SoundManager != null:
+		SoundManager.play_sfx("button")
+	var was_paused := get_tree().paused
+	get_tree().paused = true
+	var scene := load("res://scenes/popups/settings_popup.tscn") as PackedScene
+	if scene != null:
+		var popup := scene.instantiate()
+		popup.show_main_menu_button = true
+		popup.closed.connect(func():
+			get_tree().paused = was_paused
+		)
+		popup.main_menu_requested.connect(func():
+			get_tree().paused = false
+			get_tree().change_scene_to_file("res://scenes/splash/splash_screen.tscn")
+		)
+		popup.privacy_policy_requested.connect(func():
+			var pp_scene := load("res://scenes/popups/privacy_policy_popup.tscn") as PackedScene
+			if pp_scene != null:
+				popup.add_child(pp_scene.instantiate())
+		)
+		hud_root.add_child(popup)
+	else:
+		get_tree().paused = was_paused
+
+func _on_fail_home_pressed() -> void:
+	if SoundManager != null:
+		SoundManager.play_sfx("button")
+	_cleanup_fail_overlay()
+	get_tree().change_scene_to_file("res://scenes/splash/splash_screen.tscn")
+
 func _on_retry_pressed() -> void:
+	if is_instance_valid(fail_popup) and not _spend_coins(CONTINUE_COIN_COST):
+		return
 	if SoundManager != null:
 		SoundManager.play_sfx("button")
 	_cleanup_fail_overlay()

@@ -14,6 +14,16 @@ const TEST_BANNER_AD_ID: String = "ca-app-pub-3940256099942544/6300978111"
 const TEST_INTERSTITIAL_AD_ID: String = "ca-app-pub-3940256099942544/1033173712"
 const TEST_REWARDED_AD_ID: String = "ca-app-pub-3940256099942544/5224354917"
 
+const GOOGLE_TEST_PREFIX: String = "ca-app-pub-3940256099942544"
+const PRODUCT_REMOVE_ADS: String = "remove_ads"
+const PRODUCT_COFFEE: String = "cofee"
+const PLAY_STORE_URL: String = "https://play.google.com/store/apps/details?id=com.candyboy.boyfavoritecollection"
+const SHOP_PACKS := {
+	"coins_1000": {"coins": 1000, "price": "$0.99", "title": "1,000 COINS"},
+	"coins_2000": {"coins": 2000, "price": "$1.29", "title": "2,000 COINS"},
+	"coins_3000": {"coins": 3000, "price": "$1.99", "title": "3,000 COINS"},
+}
+
 var _banner_ad_id: String = BANNER_AD_ID
 var _interstitial_ad_id: String = INTERSTITIAL_AD_ID
 var _rewarded_ad_id: String = REWARDED_AD_ID
@@ -27,11 +37,18 @@ signal interstitial_failed(err_msg: String)
 signal rewarded_ad_loaded
 signal rewarded_ad_completed(amount: int, reward_type: String)
 signal rewarded_ad_failed(err_msg: String)
+signal rewarded_ready_changed(ready: bool)
+signal no_fill_changed(no_fill: bool)
+signal purchase_state_changed(owned: bool, message: String)
+signal pack_purchase_verified(coins: int, message: String)
+signal coffee_purchased(message: String)
 
 static var instance: Node = null
 static var is_initialized: bool = false
 var _plugin_available: bool = false
 var is_ads_removed: bool = false
+var no_fill_this_launch: bool = false
+var rewarded_ready: bool = false
 
 # Cached Ad Objects
 var _banner_view = null
@@ -89,13 +106,35 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_load_local_ad_ids()
 	print("[AdManager] Initializing AdManager...")
+	call_deferred("_startup_services")
+
+func _is_test_ad_id(ad_id: String) -> bool:
+	return ad_id.begins_with(GOOGLE_TEST_PREFIX)
+
+func _mark_no_fill(reason: String) -> void:
+	if not no_fill_this_launch:
+		no_fill_this_launch = true
+		push_warning("[AdManager] No-fill active: %s" % reason)
+		hide_banner()
+		no_fill_changed.emit(true)
+	if rewarded_ready:
+		rewarded_ready = false
+		rewarded_ready_changed.emit(false)
+
+func _startup_services() -> void:
+	if not is_inside_tree():
+		return
+	if _is_test_ad_id(_banner_ad_id) or _is_test_ad_id(_interstitial_ad_id) or _is_test_ad_id(_rewarded_ad_id):
+		_plugin_available = false
+		_mark_no_fill("test AdMob IDs detected — blocking ads")
+		return
 	if OS.get_name() == "Android" or OS.get_name() == "iOS":
 		_plugin_available = true
 		print("[AdManager] Mobile platform detected: %s. Initializing MobileAds SDK..." % OS.get_name())
 		_init_mobile_ads()
 	else:
 		_plugin_available = false
-		print("[AdManager] Desktop/Editor environment detected. Ads will run in simulation mode.")
+		_mark_no_fill("desktop environment — live ads disabled")
 
 func _init_mobile_ads() -> void:
 	if not _plugin_available:
@@ -156,6 +195,7 @@ func _load_banner() -> void:
 		_banner_cb_top.on_ad_failed_to_load = func(err):
 			var err_str: String = str(err.message if "message" in err else err)
 			print("[AdManager] TOP Banner ad failed to load: ", err_str)
+			_mark_no_fill("top banner failed: %s" % err_str)
 			banner_failed.emit(err_str)
 		_banner_view_top.ad_listener = _banner_cb_top
 		_banner_view_top.load_ad(AdRequest.new())
@@ -175,6 +215,7 @@ func _load_banner() -> void:
 		_banner_cb_bottom.on_ad_failed_to_load = func(err):
 			var err_str: String = str(err.message if "message" in err else err)
 			print("[AdManager] BOTTOM Banner ad failed to load: ", err_str)
+			_mark_no_fill("bottom banner failed: %s" % err_str)
 		_banner_view_bottom.ad_listener = _banner_cb_bottom
 		_banner_view_bottom.load_ad(AdRequest.new())
 
@@ -188,8 +229,8 @@ func _stop_gameplay_banner_timer() -> void:
 
 # Non-gameplay screens: continue showing BOTH top and bottom banner ads
 func show_banner() -> void:
-	if is_ads_removed:
-		print("[AdManager] Banner not shown: Ads removed via IAP.")
+	if is_ads_removed or no_fill_this_launch:
+		hide_banner()
 		return
 	_stop_gameplay_banner_timer()
 	_is_banner_requested = true
@@ -199,8 +240,8 @@ func show_banner() -> void:
 
 # Active gameplay: show ONLY top banner and hide/show it every 5 seconds
 func show_gameplay_banner() -> void:
-	if is_ads_removed:
-		print("[AdManager] Gameplay banner not shown: Ads removed via IAP.")
+	if is_ads_removed or no_fill_this_launch:
+		hide_banner()
 		return
 	_stop_gameplay_banner_timer()
 	_is_banner_requested = true
@@ -356,34 +397,16 @@ func _load_interstitial() -> void:
 		_interstitial_ad = null
 		var err_str: String = str(err.message if "message" in err else err)
 		print("[AdManager] Interstitial failed to load: ", err_str)
+		_mark_no_fill("interstitial failed: %s" % err_str)
 		interstitial_failed.emit(err_str)
-		if not is_ads_removed and is_instance_valid(instance):
-			var tw := instance.create_tween()
-			tw.tween_interval(30.0)
-			tw.tween_callback(func():
-				if _interstitial_ad == null and not is_ads_removed:
-					_load_interstitial()
-			)
 
 	loader.load(_interstitial_ad_id, AdRequest.new(), _interstitial_cb)
 
 func show_interstitial() -> bool:
-	if is_ads_removed:
+	if is_ads_removed or no_fill_this_launch:
 		return false
 	if not _plugin_available:
-		print("[AdManager-Mock] show_interstitial() invoked (desktop simulation).")
-		_pause_game_for_ad()
-		if is_instance_valid(instance):
-			var tw := instance.create_tween()
-			tw.tween_interval(0.6)
-			tw.tween_callback(func():
-				_resume_game_from_ad()
-				interstitial_dismissed.emit()
-			)
-		else:
-			_resume_game_from_ad()
-			interstitial_dismissed.emit()
-		return true
+		return false
 
 	if _interstitial_ad != null:
 		print("[AdManager] Displaying Interstitial Ad...")
@@ -417,13 +440,17 @@ func _load_rewarded() -> void:
 
 	_rewarded_load_cb.on_ad_loaded = func(ad: RewardedAd) -> void:
 		_rewarded_ad = ad
+		rewarded_ready = not no_fill_this_launch
 		print("[AdManager] Rewarded Ad loaded and ready!")
 		rewarded_ad_loaded.emit()
+		rewarded_ready_changed.emit(rewarded_ready)
 
 		_rewarded_content_cb = FullScreenContentCallback.new()
 		_rewarded_content_cb.on_ad_dismissed_full_screen_content = func():
 			print("[AdManager] Rewarded Ad full screen dismissed.")
 			_rewarded_ad = null
+			rewarded_ready = false
+			rewarded_ready_changed.emit(false)
 			_resume_game_from_ad()
 			_load_rewarded()
 
@@ -431,6 +458,8 @@ func _load_rewarded() -> void:
 			var err_str: String = str(err.message if "message" in err else err)
 			print("[AdManager] Rewarded Ad failed to show: ", err_str)
 			_rewarded_ad = null
+			rewarded_ready = false
+			rewarded_ready_changed.emit(false)
 			_resume_game_from_ad()
 			rewarded_ad_failed.emit(err_str)
 			_load_rewarded()
@@ -441,39 +470,23 @@ func _load_rewarded() -> void:
 		_rewarded_ad = null
 		var err_str: String = str(err.message if "message" in err else err)
 		print("[AdManager] Rewarded Ad failed to load: ", err_str)
+		_mark_no_fill("rewarded failed: %s" % err_str)
 		rewarded_ad_failed.emit(err_str)
-		if is_instance_valid(instance):
-			var tw := instance.create_tween()
-			tw.tween_interval(25.0)
-			tw.tween_callback(func():
-				if _rewarded_ad == null:
-					_load_rewarded()
-			)
 
 	loader.load(_rewarded_ad_id, AdRequest.new(), _rewarded_load_cb)
 
 ## Shows the Rewarded Video.
 ## Calls the provided on_reward_earned callback when user finishes watching.
 func show_rewarded(on_reward_earned: Callable = Callable()) -> bool:
+	if no_fill_this_launch or not is_rewarded_ready():
+		return false
 	_pending_reward_callback = on_reward_earned
 	_pause_game_for_ad()
 
-	if not _plugin_available:
-		print("[AdManager-Mock] show_rewarded() called in desktop mode. Simulating reward after 0.8s...")
-		if is_instance_valid(instance):
-			var tw := instance.create_tween()
-			tw.tween_interval(0.8)
-			tw.tween_callback(func():
-				_resume_game_from_ad()
-				_grant_reward(10, "coins")
-			)
-		else:
-			_resume_game_from_ad()
-			_grant_reward(10, "coins")
-		return true
-
 	if _rewarded_ad != null:
 		print("[AdManager] Showing Rewarded Video Ad...")
+		rewarded_ready = false
+		rewarded_ready_changed.emit(false)
 		_reward_listener = OnUserEarnedRewardListener.new()
 		_reward_listener.on_user_earned_reward = func(reward_item):
 			var amt: int = reward_item.amount if reward_item else 10
@@ -484,10 +497,6 @@ func show_rewarded(on_reward_earned: Callable = Callable()) -> bool:
 		return true
 	else:
 		_resume_game_from_ad()
-		print("[AdManager] Rewarded Ad not ready yet. Preloading...")
-		rewarded_ad_failed.emit("Rewarded ad is loading, please try again in a few seconds!")
-		if is_initialized:
-			_load_rewarded()
 		return false
 
 func _grant_reward(amount: int, reward_type: String) -> void:
@@ -499,9 +508,9 @@ func _grant_reward(amount: int, reward_type: String) -> void:
 	rewarded_ad_completed.emit(amount, reward_type)
 
 func is_rewarded_ready() -> bool:
-	if not _plugin_available:
-		return true # Always mock ready on desktop
-	return _rewarded_ad != null
+	if no_fill_this_launch or not _plugin_available:
+		return false
+	return rewarded_ready and _rewarded_ad != null
 
 # ==============================================================================
 # 4. REMOVE ADS (IAP INTEGRATION - $4.99)
@@ -519,3 +528,27 @@ func remove_all_ads() -> void:
 	_banner_view = null
 	_interstitial_ad = null
 	print("[AdManager] Banner & Interstitial ads removed permanently ($4.99). Rewarded ads remain active.")
+
+func purchase_available() -> bool:
+	return false
+
+func request_pack_purchase(pack_id: String) -> void:
+	if not SHOP_PACKS.has(pack_id):
+		return
+	pack_purchase_verified.emit(0, "Google Play Billing is unavailable in this build.")
+
+func request_coffee_purchase() -> void:
+	coffee_purchased.emit("Google Play Billing is unavailable in this build.")
+
+func request_remove_ads() -> void:
+	purchase_state_changed.emit(is_ads_removed, "Google Play Billing is unavailable in this build.")
+
+func restore_purchases() -> void:
+	purchase_state_changed.emit(is_ads_removed, "No previous purchases found on this device.")
+
+func rate_app() -> void:
+	OS.shell_open(PLAY_STORE_URL)
+
+func share_game() -> void:
+	var share_text := "I'm playing Boy Favorite Collection! Can you sneak past Granny? %s" % PLAY_STORE_URL
+	DisplayServer.clipboard_set(share_text)

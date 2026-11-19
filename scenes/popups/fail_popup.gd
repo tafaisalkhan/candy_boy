@@ -3,6 +3,7 @@ extends Control
 
 signal retry_pressed
 signal continue_pressed
+signal home_pressed
 
 @export var reason_text: String = "YOU WERE SPOTTED BY THE GUARD!"
 @export var tip_text: String = "💡 TIP: Sneak when guards turn away or use Invisibility!"
@@ -13,6 +14,8 @@ var game_title_font: Font = null
 var game_body_font: Font = null
 var current_coins: int = -1
 var continue_btn: Button = null
+var retry_btn: Button = null
+var ad_btn: Button = null
 
 func _ready() -> void:
 	_init_fonts()
@@ -48,14 +51,16 @@ func _get_available_coins() -> int:
 	return maxi(0, current_coins)
 
 func _refresh_continue_button() -> void:
-	if not is_instance_valid(continue_btn):
-		return
 	var can_afford := _get_available_coins() >= continue_coin_cost
-	continue_btn.disabled = not can_afford
-	if can_afford:
-		continue_btn.text = "👻 CONTINUE (%d COINS 🪙)" % continue_coin_cost
-	else:
-		continue_btn.text = "🔒 CONTINUE (%d COINS 🪙)" % continue_coin_cost
+	if is_instance_valid(continue_btn):
+		continue_btn.disabled = not can_afford
+		continue_btn.text = ("👻 CONTINUE (%d COINS 🪙)" if can_afford else "🔒 CONTINUE (%d COINS 🪙)") % continue_coin_cost
+	if is_instance_valid(retry_btn):
+		retry_btn.disabled = not can_afford
+		retry_btn.text = ("🔄 RETRY (%d COINS 🪙)" if can_afford else "🔒 RETRY (%d COINS 🪙)") % continue_coin_cost
+	if is_instance_valid(ad_btn):
+		var ad_mgr = get_tree().root.get_node_or_null("AdManager") if is_inside_tree() else null
+		ad_btn.visible = ad_mgr != null and ad_mgr.has_method("is_rewarded_ready") and ad_mgr.is_rewarded_ready()
 
 func _load_texture(path: String) -> Texture2D:
 	if ResourceLoader.exists(path):
@@ -218,52 +223,11 @@ func _build_ui() -> void:
 	tip_lbl.add_theme_color_override("font_color", Color("#ffeaa7"))
 	tip_margin.add_child(tip_lbl)
 
-	# Tactile 3D Continue with Coins Button (Revive + Temporary Invisibility)
-	continue_btn = Button.new()
-	continue_btn.custom_minimum_size = Vector2(520, 70)
-	continue_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	var cont_style := StyleBoxFlat.new()
-	cont_style.bg_color = Color("#2ecc71")
-	cont_style.border_color = Color("#1e8449")
-	cont_style.border_width_bottom = 6
-	cont_style.border_width_left = 3
-	cont_style.border_width_right = 3
-	cont_style.border_width_top = 2
-	cont_style.set_corner_radius_all(24)
-	cont_style.shadow_color = Color(0, 0, 0, 0.35)
-	cont_style.shadow_size = 6
+	# Only Retry (with coins) is shown on level fail (no Continue button)
+	continue_btn = null
 
-	var cont_hover := cont_style.duplicate() as StyleBoxFlat
-	cont_hover.bg_color = Color("#58d68d")
-
-	var cont_press := cont_style.duplicate() as StyleBoxFlat
-	cont_press.bg_color = Color("#27ae60")
-	cont_press.border_width_bottom = 2
-	cont_press.border_width_top = 6
-
-	var cont_disabled := cont_style.duplicate() as StyleBoxFlat
-	cont_disabled.bg_color = Color("#5d6d7e")
-	cont_disabled.border_color = Color("#34495e")
-
-	continue_btn.add_theme_stylebox_override("normal", cont_style)
-	continue_btn.add_theme_stylebox_override("hover", cont_hover)
-	continue_btn.add_theme_stylebox_override("pressed", cont_press)
-	continue_btn.add_theme_stylebox_override("disabled", cont_disabled)
-	if game_title_font != null:
-		continue_btn.add_theme_font_override("font", game_title_font)
-	continue_btn.add_theme_font_size_override("font_size", 30)
-	continue_btn.add_theme_color_override("font_color", Color.WHITE)
-	continue_btn.add_theme_color_override("font_disabled_color", Color("#d5dbdb"))
-	continue_btn.add_theme_color_override("font_outline_color", Color("#145a32"))
-	continue_btn.add_theme_constant_override("outline_size", 8)
-	continue_btn.pressed.connect(func():
-		continue_pressed.emit()
-	)
-	v_box.add_child(continue_btn)
-	_refresh_continue_button()
-
-	# Rewarded Video Ad Button (Watch for Bonus Coins)
-	var ad_btn := Button.new()
+	# Rewarded Video Ad Button (only visible when an ad is actually ready)
+	ad_btn = Button.new()
 	ad_btn.text = "🎬 WATCH AD (+30 COINS 🪙)"
 	ad_btn.custom_minimum_size = Vector2(520, 62)
 	ad_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -317,10 +281,12 @@ func _build_ui() -> void:
 			)
 	)
 	v_box.add_child(ad_btn)
+	var ad_mgr_init = get_tree().root.get_node_or_null("AdManager") if is_inside_tree() else null
+	ad_btn.visible = ad_mgr_init != null and ad_mgr_init.has_method("is_rewarded_ready") and ad_mgr_init.is_rewarded_ready()
 
-	# Tactile 3D Try Again Button
-	var retry_btn := Button.new()
-	retry_btn.text = "🔄 TRY AGAIN"
+	# Tactile 3D Try Again Button (consumes coins on fail)
+	retry_btn = Button.new()
+	retry_btn.text = "🔄 RETRY (%d COINS 🪙)" % continue_coin_cost
 	retry_btn.custom_minimum_size = Vector2(520, 68)
 	retry_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var btn_style := StyleBoxFlat.new()
@@ -355,6 +321,26 @@ func _build_ui() -> void:
 		retry_pressed.emit()
 	)
 	v_box.add_child(retry_btn)
+
+	var home_btn := Button.new()
+	home_btn.text = "🏠 HOME"
+	home_btn.custom_minimum_size = Vector2(520, 56)
+	home_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var home_style := StyleBoxFlat.new()
+	home_style.bg_color = Color("#2c3e50")
+	home_style.border_color = Color("#1a252f")
+	home_style.border_width_bottom = 6
+	home_style.set_corner_radius_all(22)
+	home_btn.add_theme_stylebox_override("normal", home_style)
+	if game_title_font != null:
+		home_btn.add_theme_font_override("font", game_title_font)
+	home_btn.add_theme_font_size_override("font_size", 26)
+	home_btn.add_theme_color_override("font_color", Color.WHITE)
+	home_btn.pressed.connect(func():
+		home_pressed.emit()
+	)
+	v_box.add_child(home_btn)
+	_refresh_continue_button()
 
 	# Entrance bounce animation
 	card.scale = Vector2(0.3, 0.3)
