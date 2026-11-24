@@ -85,9 +85,31 @@ var _pending_reward_callback: Callable = Callable()
 var _was_game_paused_before_ad: bool = false
 var _is_ad_showing: bool = false
 
-# Interstitial Level Counter (show interstitial at every level end)
+# Interstitial Level Counter & Policy Pacing
+# - Interstitial frequency:               Every 3 completed levels (INTERSTITIAL_LEVEL_INTERVAL = 3)
+# - Minimum interval between interstitials: 120 seconds (MIN_INTERSTITIAL_INTERVAL_SEC = 120.0)
+# - Maximum interstitials per hour:       10 (MAX_INTERSTITIALS_PER_HOUR = 10, rolling 3600s window)
+# - Banner:                               One per screen, away from controls (bottom banner only on non-gameplay screens)
+# - Banner refresh:                       AdMob-managed automatic refresh
+# - Rewarded ads:                         User-initiated only
+# - First-level interstitial:             Disabled
+# - Ads during gameplay:                  Disabled
+# - Failed ad loading:                    Retry with exponential backoff (2s -> 64s, max 6 attempts)
 var levels_since_last_interstitial: int = 0
-const INTERSTITIAL_LEVEL_INTERVAL: int = 1
+const INTERSTITIAL_LEVEL_INTERVAL: int = 3
+const MIN_INTERSTITIAL_INTERVAL_SEC: float = 120.0
+const MAX_INTERSTITIALS_PER_HOUR: int = 10
+const ROLLING_HOUR_SEC: float = 3600.0
+const BACKOFF_BASE_SEC: float = 2.0
+const BACKOFF_MAX_SEC: float = 64.0
+const BACKOFF_MAX_ATTEMPTS: int = 6
+
+var last_interstitial_unix_sec: float = -999999.0
+var interstitial_timestamps_sec: Array[float] = []
+var gameplay_active: bool = false
+var _banner_retry_attempt: int = 0
+var _interstitial_retry_attempt: int = 0
+var _rewarded_retry_attempt: int = 0
 
 func _enter_tree() -> void:
 	instance = self
@@ -109,6 +131,7 @@ func _ready() -> void:
 	_load_local_ad_ids()
 	print("[AdManager] Initializing AdManager...")
 	call_deferred("_startup_services")
+	call_deferred("_start_billing")
 
 func _is_test_ad_id(ad_id: String) -> bool:
 	return ad_id.begins_with(GOOGLE_TEST_PREFIX)
@@ -170,8 +193,9 @@ func _pause_game_for_ad() -> void:
 	_is_ad_showing = true
 	_was_game_paused_before_ad = get_tree().paused
 	get_tree().paused = true
-	if SoundManager != null:
-		SoundManager.stop_or_duck_bgm(true)
+	var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+	if sm != null and sm.has_method("stop_or_duck_bgm"):
+		sm.stop_or_duck_bgm(true)
 
 
 func _resume_game_from_ad() -> void:
@@ -179,8 +203,9 @@ func _resume_game_from_ad() -> void:
 		return
 	_is_ad_showing = false
 	get_tree().paused = _was_game_paused_before_ad
-	if SoundManager != null and SoundManager.music_enabled:
-		SoundManager.start_bgm()
+	var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+	if sm != null and sm.music_enabled:
+		sm.start_bgm()
 
 # ==============================================================================
 # 1. BANNER AD METHODS
@@ -245,44 +270,30 @@ func _stop_gameplay_banner_timer() -> void:
 		_gameplay_banner_tween.kill()
 		_gameplay_banner_tween = null
 
-# Non-gameplay screens: continue showing BOTH top and bottom banner ads
+func _compute_backoff_delay(attempt: int) -> float:
+	var exp_delay := minf(BACKOFF_MAX_SEC, BACKOFF_BASE_SEC * pow(2.0, float(clampi(attempt, 0, BACKOFF_MAX_ATTEMPTS))))
+	return exp_delay + randf_range(0.0, 0.75)
+
+func set_gameplay_active(active: bool) -> void:
+	gameplay_active = active
+	if gameplay_active:
+		hide_banner()
+
+# Non-gameplay screens: show ONLY ONE banner per screen (bottom banner, away from controls)
 func show_banner() -> void:
-	if is_ads_removed or no_fill_this_launch:
+	if is_ads_removed or no_fill_this_launch or gameplay_active:
 		hide_banner()
 		return
 	_stop_gameplay_banner_timer()
 	_is_banner_requested = true
-	_show_top_banner = true
+	_show_top_banner = false
 	_show_bottom_banner = true
-	_apply_banner_visibility(true, true)
+	_apply_banner_visibility(false, true)
 
-# Active gameplay: show ONLY top banner and hide/show it every 5 seconds
+# Active gameplay: Ads during gameplay are strictly disabled per AdMob Policy Standard
 func show_gameplay_banner() -> void:
-	if is_ads_removed or no_fill_this_launch:
-		hide_banner()
-		return
-	_stop_gameplay_banner_timer()
-	_is_banner_requested = true
-	_show_top_banner = true
-	_show_bottom_banner = false
-	_apply_banner_visibility(true, false)
-
-	_gameplay_banner_tween = create_tween()
-	_gameplay_banner_tween.set_loops()
-	_gameplay_banner_tween.tween_interval(GAMEPLAY_TOP_BANNER_DURATION)
-	_gameplay_banner_tween.tween_callback(func():
-		if not is_ads_removed:
-			_show_top_banner = false
-			_show_bottom_banner = false
-			_apply_banner_visibility(false, false)
-	)
-	_gameplay_banner_tween.tween_interval(GAMEPLAY_TOP_BANNER_DURATION)
-	_gameplay_banner_tween.tween_callback(func():
-		if not is_ads_removed:
-			_show_top_banner = true
-			_show_bottom_banner = false
-			_apply_banner_visibility(true, false)
-	)
+	set_gameplay_active(true)
+	hide_banner()
 
 func hide_banner() -> void:
 	_stop_gameplay_banner_timer()
@@ -293,9 +304,7 @@ func hide_banner() -> void:
 
 func _apply_banner_visibility(show_top: bool, show_bottom: bool) -> void:
 	if not _plugin_available:
-		if show_top or show_bottom:
-			_show_mock_desktop_banner(show_top, show_bottom)
-		elif is_instance_valid(_mock_banner_layer):
+		if is_instance_valid(_mock_banner_layer):
 			_mock_banner_layer.visible = false
 		return
 
@@ -415,19 +424,39 @@ func _load_interstitial() -> void:
 		_interstitial_ad = null
 		var err_str: String = str(err.message if "message" in err else err)
 		print("[AdManager] Interstitial failed to load: ", err_str)
-		_mark_no_fill("interstitial failed: %s" % err_str)
+		if _interstitial_retry_attempt < BACKOFF_MAX_ATTEMPTS and not is_ads_removed:
+			var delay := _compute_backoff_delay(_interstitial_retry_attempt)
+			_interstitial_retry_attempt += 1
+			get_tree().create_timer(delay).timeout.connect(_load_interstitial)
+		else:
+			_mark_no_fill("interstitial failed: %s" % err_str)
 		interstitial_failed.emit(err_str)
 
 	loader.load(_interstitial_ad_id, AdRequest.new(), _interstitial_cb)
 
-func show_interstitial() -> bool:
-	if is_ads_removed or no_fill_this_launch:
+func _can_show_interstitial_now() -> bool:
+	if is_ads_removed or no_fill_this_launch or gameplay_active or not _plugin_available:
 		return false
-	if not _plugin_available:
+	var now_sec := Time.get_unix_time_from_system()
+	if (now_sec - last_interstitial_unix_sec) < MIN_INTERSTITIAL_INTERVAL_SEC:
+		return false
+	var cutoff := now_sec - ROLLING_HOUR_SEC
+	for i in range(interstitial_timestamps_sec.size() - 1, -1, -1):
+		if interstitial_timestamps_sec[i] < cutoff:
+			interstitial_timestamps_sec.remove_at(i)
+	if interstitial_timestamps_sec.size() >= MAX_INTERSTITIALS_PER_HOUR:
+		return false
+	return true
+
+func show_interstitial() -> bool:
+	if not _can_show_interstitial_now():
 		return false
 
 	if _interstitial_ad != null:
 		print("[AdManager] Displaying Interstitial Ad...")
+		var now_sec := Time.get_unix_time_from_system()
+		last_interstitial_unix_sec = now_sec
+		interstitial_timestamps_sec.append(now_sec)
 		_pause_game_for_ad()
 		_interstitial_ad.show()
 		return true
@@ -437,12 +466,19 @@ func show_interstitial() -> bool:
 			_load_interstitial()
 		return false
 
-## Helper to show interstitial every N levels (e.g. on victory)
-func on_level_finished_check_interstitial(force_show: bool = false) -> bool:
+## Helper to show interstitial every 3 completed levels (Level 1 disabled, 120s cooldown, max 10/hr)
+func on_level_finished_check_interstitial(force_show: bool = false, completed_level: int = -1) -> bool:
+	set_gameplay_active(false)
+	var gm = get_tree().root.get_node_or_null("GameManager") if is_inside_tree() else null
+	var lvl: int = completed_level if completed_level > 0 else (int(gm.current_level) if gm != null else 2)
+	# First-level interstitial: Disabled
+	if lvl <= 1:
+		return false
 	levels_since_last_interstitial += 1
 	if force_show or levels_since_last_interstitial >= INTERSTITIAL_LEVEL_INTERVAL:
-		levels_since_last_interstitial = 0
-		return show_interstitial()
+		if _can_show_interstitial_now():
+			levels_since_last_interstitial = 0
+			return show_interstitial()
 	return false
 
 # ==============================================================================
@@ -488,7 +524,12 @@ func _load_rewarded() -> void:
 		_rewarded_ad = null
 		var err_str: String = str(err.message if "message" in err else err)
 		print("[AdManager] Rewarded Ad failed to load: ", err_str)
-		_mark_no_fill("rewarded failed: %s" % err_str)
+		if _rewarded_retry_attempt < BACKOFF_MAX_ATTEMPTS:
+			var delay := _compute_backoff_delay(_rewarded_retry_attempt)
+			_rewarded_retry_attempt += 1
+			get_tree().create_timer(delay).timeout.connect(_load_rewarded)
+		else:
+			_mark_no_fill("rewarded failed: %s" % err_str)
 		rewarded_ad_failed.emit(err_str)
 
 	loader.load(_rewarded_ad_id, AdRequest.new(), _rewarded_load_cb)
@@ -548,21 +589,123 @@ func remove_all_ads() -> void:
 	print("[AdManager] Banner & Interstitial ads removed permanently ($4.99). Rewarded ads remain active.")
 
 func purchase_available() -> bool:
-	return false
+	return _billing_ready
+
+# ==============================================================================
+# 5. GOOGLE PLAY BILLING (coins_1000 / coins_2000 / coins_3000 / cofee / remove_ads)
+# ==============================================================================
+var _billing_plugin = null
+var _billing_ready: bool = false
+var live_prices: Dictionary = {}
+
+func _start_billing() -> void:
+	if OS.get_name() != "Android" or not Engine.has_singleton("CandyBoyAppPlugin"):
+		return
+	_billing_plugin = Engine.get_singleton("CandyBoyAppPlugin")
+	if not _billing_plugin.has_method("billing_start"):
+		_billing_plugin = null
+		return
+	_billing_plugin.connect("billing_connected", _on_billing_connected)
+	_billing_plugin.connect("billing_error", _on_billing_error)
+	_billing_plugin.connect("billing_prices", _on_billing_prices)
+	_billing_plugin.connect("purchase_success", _on_purchase_success)
+	_billing_plugin.connect("purchase_pending", _on_purchase_pending)
+	_billing_plugin.connect("purchase_failed", _on_purchase_failed)
+	_billing_plugin.connect("restore_finished", _on_restore_finished)
+	_billing_plugin.billing_start()
+
+func _on_billing_connected() -> void:
+	_billing_ready = true
+	print("[Billing] Connected to Google Play Billing.")
+
+func _on_billing_error(msg: String) -> void:
+	push_warning("[Billing] " + msg)
+	purchase_state_changed.emit(is_ads_removed, msg)
+
+func _on_billing_prices(json_txt: String) -> void:
+	var parsed = JSON.parse_string(json_txt)
+	if parsed is Dictionary:
+		live_prices = parsed
+
+## Real localized Google Play price if loaded, else the default USD price.
+func get_price(product_id: String) -> String:
+	if live_prices.has(product_id):
+		return str(live_prices[product_id])
+	if SHOP_PACKS.has(product_id):
+		return str(SHOP_PACKS[product_id]["price"])
+	if product_id == PRODUCT_COFFEE:
+		return "$1.99"
+	if product_id == PRODUCT_REMOVE_ADS:
+		return "$4.99"
+	return ""
+
+func _on_purchase_success(product_id: String, restored: bool) -> void:
+	var gm = get_tree().root.get_node_or_null("GameManager") if is_inside_tree() else null
+	if SHOP_PACKS.has(product_id):
+		var coins: int = int(SHOP_PACKS[product_id]["coins"])
+		if gm != null and gm.has_method("add_coins"):
+			gm.add_coins(coins)
+		pack_purchase_verified.emit(coins, "+%d coins added. Thank you!" % coins)
+	elif product_id == PRODUCT_COFFEE:
+		coffee_purchased.emit("Thank you so much for the coffee! ☕")
+	elif product_id == PRODUCT_REMOVE_ADS:
+		if gm != null and gm.has_method("set_ads_removed"):
+			gm.set_ads_removed(true)
+		else:
+			remove_all_ads()
+		purchase_state_changed.emit(true, "Ads removed restored!" if restored else "Ads removed forever. Thank you!")
+
+func _on_purchase_pending(product_id: String) -> void:
+	var msg := "Payment pending — your item arrives once Google Play confirms it."
+	if SHOP_PACKS.has(product_id):
+		pack_purchase_verified.emit(0, msg)
+	elif product_id == PRODUCT_COFFEE:
+		coffee_purchased.emit(msg)
+	else:
+		purchase_state_changed.emit(is_ads_removed, msg)
+
+func _on_purchase_failed(product_id: String, msg: String) -> void:
+	if product_id == PRODUCT_COFFEE:
+		coffee_purchased.emit(msg)
+	elif product_id == PRODUCT_REMOVE_ADS:
+		purchase_state_changed.emit(is_ads_removed, msg)
+	else:
+		pack_purchase_verified.emit(0, msg)
+		if product_id == "":
+			coffee_purchased.emit(msg)
+			purchase_state_changed.emit(is_ads_removed, msg)
+
+func _on_restore_finished(count: int) -> void:
+	purchase_state_changed.emit(is_ads_removed, "Restore complete." if count > 0 else "No previous purchases found.")
+
+func _buy(product_id: String) -> bool:
+	if _billing_plugin == null:
+		return false
+	_billing_plugin.billing_purchase(product_id)
+	return true
 
 func request_pack_purchase(pack_id: String) -> void:
 	if not SHOP_PACKS.has(pack_id):
 		return
-	pack_purchase_verified.emit(0, "Google Play Billing is unavailable in this build.")
+	if not _buy(pack_id):
+		pack_purchase_verified.emit(0, "Purchases are only available in the Google Play version.")
 
 func request_coffee_purchase() -> void:
-	coffee_purchased.emit("Google Play Billing is unavailable in this build.")
+	if not _buy(PRODUCT_COFFEE):
+		coffee_purchased.emit("Purchases are only available in the Google Play version.")
 
 func request_remove_ads() -> void:
-	purchase_state_changed.emit(is_ads_removed, "Google Play Billing is unavailable in this build.")
+	if is_ads_removed:
+		purchase_state_changed.emit(true, "Ads are already removed.")
+		return
+	if not _buy(PRODUCT_REMOVE_ADS):
+		purchase_state_changed.emit(is_ads_removed, "Purchases are only available in the Google Play version.")
 
 func restore_purchases() -> void:
-	purchase_state_changed.emit(is_ads_removed, "No previous purchases found on this device.")
+	if _billing_plugin == null:
+		purchase_state_changed.emit(is_ads_removed, "Purchases are only available in the Google Play version.")
+		return
+	_billing_plugin.billing_restore()
 
 func check_in_app_update() -> void:
 	if OS.get_name() == "Android" and Engine.has_singleton("CandyBoyAppPlugin"):

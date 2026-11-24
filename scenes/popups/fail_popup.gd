@@ -22,15 +22,13 @@ func _ready() -> void:
 	_build_ui()
 
 func _init_fonts() -> void:
-	if ResourceLoader.exists("res://assets/fonts/game_title.ttf"):
+	if ResourceLoader.exists("res://assets/fonts/LuckiestGuy-Regular.ttf"):
+		game_title_font = load("res://assets/fonts/LuckiestGuy-Regular.ttf") as Font
+	elif ResourceLoader.exists("res://assets/fonts/game_title.ttf"):
 		game_title_font = load("res://assets/fonts/game_title.ttf") as Font
 	elif ResourceLoader.exists("res://assets/fonts/LilitaOne-Regular.ttf"):
 		game_title_font = load("res://assets/fonts/LilitaOne-Regular.ttf") as Font
-
-	if ResourceLoader.exists("res://assets/fonts/LilitaOne-Regular.ttf"):
-		game_body_font = load("res://assets/fonts/LilitaOne-Regular.ttf") as Font
-	else:
-		game_body_font = game_title_font
+	game_body_font = game_title_font
 
 func setup(p_reason: String = "", p_tip: String = "", p_image_path: String = "", p_continue_cost: int = -1, p_current_coins: int = -1) -> void:
 	if not p_reason.is_empty():
@@ -46,8 +44,11 @@ func setup(p_reason: String = "", p_tip: String = "", p_image_path: String = "",
 	_refresh_continue_button()
 
 func _get_available_coins() -> int:
-	if GameManager != null:
-		return GameManager.coins
+	if current_coins >= 0:
+		return current_coins
+	var gm = get_tree().root.get_node_or_null("GameManager") if is_inside_tree() else null
+	if gm != null:
+		return int(gm.coins)
 	return maxi(0, current_coins)
 
 func _refresh_continue_button() -> void:
@@ -268,15 +269,18 @@ func _build_ui() -> void:
 			ad_mgr.show_rewarded(func(amt, _type):
 				ad_btn.text = "✅ +%d COINS RECEIVED!" % amt
 				ad_btn.disabled = true
-				if GameManager != null:
-					GameManager.coins += amt
-					GameManager.save_game_state()
+				var gm = get_tree().root.get_node_or_null("GameManager") if is_inside_tree() else null
+				var sh = get_tree().root.get_node_or_null("SignalHub") if is_inside_tree() else null
+				var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+				if gm != null:
+					gm.coins += amt
+					gm.save_game_state()
 				else:
 					current_coins = maxi(0, current_coins) + amt
-				if SignalHub != null and GameManager != null:
-					SignalHub.emit_coins_changed(GameManager.coins)
-				if SoundManager != null:
-					SoundManager.play_sfx("coin_sound")
+				if sh != null and gm != null:
+					sh.emit_coins_changed(gm.coins)
+				if sm != null:
+					sm.play_sfx("coin_sound")
 				_refresh_continue_button()
 			)
 	)
@@ -342,9 +346,12 @@ func _build_ui() -> void:
 	v_box.add_child(home_btn)
 	_refresh_continue_button()
 
-	# Entrance bounce animation
-	card.scale = Vector2(0.3, 0.3)
+	# Entrance squash-and-stretch animation (pause-safe)
+	card.scale = Vector2(0.42, 0.42)
 	card.modulate.a = 0.0
 	var pop_tw := create_tween()
-	pop_tw.tween_property(card, "scale", Vector2.ONE, 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	pop_tw.parallel().tween_property(card, "modulate:a", 1.0, 0.3)
+	pop_tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	pop_tw.tween_property(card, "modulate:a", 1.0, 0.12)
+	pop_tw.parallel().tween_property(card, "scale", Vector2(1.06, 0.95), 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	pop_tw.tween_property(card, "scale", Vector2(0.98, 1.02), 0.09)
+	pop_tw.tween_property(card, "scale", Vector2.ONE, 0.08)

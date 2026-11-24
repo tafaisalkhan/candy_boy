@@ -1,9 +1,9 @@
 class_name StationProps
 extends RefCounted
 
-const PLANT_SCENE: PackedScene = preload("res://assets/models/furniture/pottedPlant.glb")
-const CONE_SCENE: PackedScene = preload("res://assets/models/cars/cone.glb")
-const BENCH_SCENE: PackedScene = preload("res://assets/models/furniture/benchCushion.glb")
+const PLANT_SCENE_PATH: String = "res://assets/models/furniture/pottedPlant.glb"
+const CONE_SCENE_PATH: String = "res://assets/models/cars/cone.glb"
+const BENCH_SCENE_PATH: String = "res://assets/models/furniture/benchCushion.glb"
 
 # 1. Red Snack & Drink Vending Machine
 static func create_vending_machine(pos: Vector3, rot_y: float = 0.0) -> Node3D:
@@ -207,8 +207,9 @@ static func create_potted_plant(pos: Vector3) -> Node3D:
 	root.name = "PottedPlant"
 	root.position = pos
 
-	if is_instance_valid(PLANT_SCENE):
-		var plant: Node3D = PLANT_SCENE.instantiate() as Node3D
+	var ps := load(PLANT_SCENE_PATH) as PackedScene if ResourceLoader.exists(PLANT_SCENE_PATH) else null
+	if is_instance_valid(ps):
+		var plant: Node3D = ps.instantiate() as Node3D
 		plant.scale = Vector3.ONE * 0.95
 		root.add_child(plant)
 	return root
@@ -219,8 +220,9 @@ static func create_caution_cone(pos: Vector3) -> Node3D:
 	root.name = "CautionCone"
 	root.position = pos
 
-	if is_instance_valid(CONE_SCENE):
-		var cone: Node3D = CONE_SCENE.instantiate() as Node3D
+	var cs := load(CONE_SCENE_PATH) as PackedScene if ResourceLoader.exists(CONE_SCENE_PATH) else null
+	if is_instance_valid(cs):
+		var cone: Node3D = cs.instantiate() as Node3D
 		cone.scale = Vector3.ONE * 0.85
 		root.add_child(cone)
 	return root
@@ -232,8 +234,9 @@ static func create_waiting_bench(pos: Vector3, rot_y: float = 0.0) -> Node3D:
 	root.position = pos
 	root.rotation_degrees.y = rot_y
 
-	if is_instance_valid(BENCH_SCENE):
-		var bench: Node3D = BENCH_SCENE.instantiate() as Node3D
+	var bs := load(BENCH_SCENE_PATH) as PackedScene if ResourceLoader.exists(BENCH_SCENE_PATH) else null
+	if is_instance_valid(bs):
+		var bench: Node3D = bs.instantiate() as Node3D
 		bench.scale = Vector3.ONE * 0.95
 		root.add_child(bench)
 	return root

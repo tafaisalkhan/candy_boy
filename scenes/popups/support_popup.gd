@@ -6,6 +6,9 @@ signal closed
 var game_title_font: Font = null
 var game_body_font: Font = null
 var status_label: Label = null
+var _card: Control = null
+## Optional: "rate", "share" or "coffee". Empty = random non-repeating pick.
+var forced_kind: String = ""
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -13,14 +16,11 @@ func _ready() -> void:
 	_build_ui()
 
 func _init_fonts() -> void:
-	if ResourceLoader.exists("res://assets/fonts/game_title.ttf"):
+	if ResourceLoader.exists("res://assets/fonts/LuckiestGuy-Regular.ttf"):
+		game_title_font = load("res://assets/fonts/LuckiestGuy-Regular.ttf") as Font
+	elif ResourceLoader.exists("res://assets/fonts/game_title.ttf"):
 		game_title_font = load("res://assets/fonts/game_title.ttf") as Font
-	elif ResourceLoader.exists("res://assets/fonts/LilitaOne-Regular.ttf"):
-		game_title_font = load("res://assets/fonts/LilitaOne-Regular.ttf") as Font
-	if ResourceLoader.exists("res://assets/fonts/LilitaOne-Regular.ttf"):
-		game_body_font = load("res://assets/fonts/LilitaOne-Regular.ttf") as Font
-	else:
-		game_body_font = game_title_font
+	game_body_font = game_title_font
 
 func _build_ui() -> void:
 	name = "SupportPopup"
@@ -28,7 +28,7 @@ func _build_ui() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
 	var backdrop := ColorRect.new()
-	backdrop.color = Color(0.02, 0.04, 0.08, 0.85)
+	backdrop.color = Color(0.01, 0.05, 0.08, 0.78)
 	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(backdrop)
 
@@ -36,88 +36,129 @@ func _build_ui() -> void:
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(center)
 
-	var card := PanelContainer.new()
-	card.custom_minimum_size = Vector2(620, 0)
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color("#1e272e")
-	style.border_color = Color("#00cec9")
-	style.border_width_bottom = 10
-	style.border_width_top = 4
-	style.border_width_left = 4
-	style.border_width_right = 4
-	style.set_corner_radius_all(32)
-	card.add_theme_stylebox_override("panel", style)
-	center.add_child(card)
+	var card_size := Vector2(680, 480)
+	_card = Control.new()
+	_card.custom_minimum_size = card_size
+	_card.size = card_size
+	_card.pivot_offset = card_size * 0.5
+	center.add_child(_card)
 
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 34)
-	margin.add_theme_constant_override("margin_right", 34)
-	margin.add_theme_constant_override("margin_top", 30)
-	margin.add_theme_constant_override("margin_bottom", 30)
-	card.add_child(margin)
+	var bg_panel := PanelContainer.new()
+	bg_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color("#184566")
+	style.border_color = Color("#0b1d2c")
+	style.set_border_width_all(6)
+	style.border_width_bottom = 12
+	style.set_corner_radius_all(24)
+	style.content_margin_left = 34
+	style.content_margin_right = 34
+	style.content_margin_top = 30
+	style.content_margin_bottom = 30
+	bg_panel.add_theme_stylebox_override("panel", style)
+	_card.add_child(bg_panel)
+
+	var close_x := Button.new()
+	close_x.text = "✖"
+	close_x.size = Vector2(54, 54)
+	close_x.position = Vector2(card_size.x - 32, -20)
+	if game_title_font != null:
+		close_x.add_theme_font_override("font", game_title_font)
+	close_x.add_theme_font_size_override("font_size", 28)
+	close_x.add_theme_color_override("font_color", Color.WHITE)
+	var cs := StyleBoxFlat.new()
+	cs.bg_color = Color("#e83b3b")
+	cs.border_color = Color("#1a0808")
+	cs.set_border_width_all(3)
+	cs.border_width_bottom = 6
+	cs.set_corner_radius_all(12)
+	close_x.add_theme_stylebox_override("normal", cs)
+	close_x.add_theme_stylebox_override("hover", cs)
+	close_x.add_theme_stylebox_override("pressed", cs)
+	close_x.pressed.connect(_close_with_anim)
+	_card.add_child(close_x)
+	_wire_button_juice(close_x)
 
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 16)
-	margin.add_child(vbox)
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 18)
+	bg_panel.add_child(vbox)
 
 	var ad_mgr = get_tree().root.get_node_or_null("AdManager") if is_inside_tree() else null
-	var is_no_ads: bool = ad_mgr != null and "no_fill_this_launch" in ad_mgr and ad_mgr.no_fill_this_launch
+	var is_no_ads: bool = forced_kind == "" and ad_mgr != null and "no_fill_this_launch" in ad_mgr and ad_mgr.no_fill_this_launch
+
+	var gm = get_tree().root.get_node_or_null("GameManager") if is_inside_tree() else null
+	var kind: String = forced_kind
+	if kind == "":
+		kind = gm.pick_random_support_popup() if gm != null and gm.has_method("pick_random_support_popup") else ["rate", "share", "coffee"][randi() % 3]
+
+	var header_txt := "Rate Boy Favorite Collection!"
+	var body_txt := "Love sneaking past Granny? A quick 5-star review on Google Play helps us add new levels & gadgets!"
+	var cta_txt := "Rate 5 Stars ★"
+	if kind == "share":
+		header_txt = "Share With Friends!"
+		body_txt = "Challenge your friends to sneak past Granny and beat your highest level!"
+		cta_txt = "Share Game"
+	elif kind == "coffee":
+		header_txt = "Buy Me a Coffee"
+		body_txt = "Support the indie developer building new rooms, gadgets, and updates!"
+		cta_txt = "Buy Coffee  •  $1.99"
 
 	var title := Label.new()
-	title.text = "🎉 NO ADS TODAY — AD-FREE!" if is_no_ads else "⭐ ENJOYING THE GAME?"
+	title.text = "NO ADS TODAY — AD-FREE!" if is_no_ads else header_txt
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	if game_title_font != null:
 		title.add_theme_font_override("font", game_title_font)
-	title.add_theme_font_size_override("font_size", 32)
-	title.add_theme_color_override("font_color", Color("#f1c40f"))
+	title.add_theme_font_size_override("font_size", 36)
+	title.add_theme_color_override("font_color", Color("#ffe885"))
+	title.add_theme_color_override("font_outline_color", Color("#0a1824"))
+	title.add_theme_constant_override("outline_size", 8)
 	vbox.add_child(title)
 
 	var msg := Label.new()
-	msg.text = "Ads are off for this session. Support Boy Favorite Collection!" if is_no_ads else "Rate us, share with friends, or buy the developer a coffee!"
+	msg.text = ("Ads are off for this session! " + body_txt) if is_no_ads else body_txt
 	msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	if game_body_font != null:
-		msg.add_theme_font_override("font", game_body_font)
+	if game_title_font != null:
+		msg.add_theme_font_override("font", game_title_font)
 	msg.add_theme_font_size_override("font_size", 22)
-	msg.add_theme_color_override("font_color", Color.WHITE)
+	msg.add_theme_color_override("font_color", Color("#e9f7ff"))
+	msg.add_theme_color_override("font_outline_color", Color("#081520"))
+	msg.add_theme_constant_override("outline_size", 5)
 	vbox.add_child(msg)
 
-	var choice := randi() % 3
 	var action_btn := Button.new()
-	action_btn.custom_minimum_size = Vector2(0, 68)
-	if choice == 0:
-		action_btn.text = "⭐ RATE GAME"
-		_style_btn(action_btn, Color("#2ecc71"), Color("#1e824c"))
-		action_btn.pressed.connect(func():
+	action_btn.text = cta_txt
+	action_btn.custom_minimum_size = Vector2(420, 74)
+	_style_btn(action_btn, Color("#7ed321"), Color("#153309"))
+	action_btn.pressed.connect(func():
+		var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+		if sm != null and sm.has_method("play_sfx"):
+			sm.play_sfx("button")
+		if kind == "rate":
 			if ad_mgr != null and ad_mgr.has_method("rate_app"):
 				ad_mgr.rate_app()
-			closed.emit()
-			queue_free()
-		)
-	elif choice == 1:
-		action_btn.text = "📤 SHARE GAME"
-		_style_btn(action_btn, Color("#3498db"), Color("#1f618d"))
-		action_btn.pressed.connect(func():
+			_close_with_anim()
+		elif kind == "share":
 			if ad_mgr != null and ad_mgr.has_method("share_game"):
 				ad_mgr.share_game()
 			if is_instance_valid(status_label):
 				status_label.text = "Share link copied to clipboard!"
-		)
-	else:
-		action_btn.text = "☕ BUY COFFEE ($1.99)"
-		_style_btn(action_btn, Color("#e67e22"), Color("#d35400"))
-		action_btn.pressed.connect(func():
+		else:
 			if ad_mgr != null and ad_mgr.has_method("request_coffee_purchase"):
 				ad_mgr.request_coffee_purchase()
-		)
-	vbox.add_child(action_btn)
+	)
+	var aw := CenterContainer.new()
+	aw.add_child(action_btn)
+	vbox.add_child(aw)
 
 	status_label = Label.new()
 	status_label.text = ""
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	if game_body_font != null:
-		status_label.add_theme_font_override("font", game_body_font)
+	if game_title_font != null:
+		status_label.add_theme_font_override("font", game_title_font)
 	status_label.add_theme_font_size_override("font_size", 18)
 	status_label.add_theme_color_override("font_color", Color("#ffeaa7"))
 	vbox.add_child(status_label)
@@ -128,24 +169,64 @@ func _build_ui() -> void:
 				status_label.text = m
 		)
 
-	var close_btn := Button.new()
-	close_btn.text = "CLOSE"
-	close_btn.custom_minimum_size = Vector2(0, 54)
-	_style_btn(close_btn, Color("#34495e"), Color("#1a252f"))
-	close_btn.pressed.connect(func():
+	_card.scale = Vector2(0.42, 0.42)
+	_card.modulate.a = 0.0
+	var tw := create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_property(_card, "modulate:a", 1.0, 0.12)
+	tw.parallel().tween_property(_card, "scale", Vector2(1.06, 0.95), 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_card, "scale", Vector2(0.98, 1.02), 0.09)
+	tw.tween_property(_card, "scale", Vector2.ONE, 0.08)
+
+func _close_with_anim() -> void:
+	var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+	if sm != null and sm.has_method("play_sfx"):
+		sm.play_sfx("button")
+	if is_instance_valid(_card):
+		var tw := create_tween()
+		tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		tw.tween_property(_card, "scale", Vector2(1.05, 1.05), 0.06)
+		tw.tween_property(_card, "scale", Vector2(0.35, 0.35), 0.14).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+		tw.parallel().tween_property(_card, "modulate:a", 0.0, 0.14)
+		tw.tween_callback(func():
+			closed.emit()
+			queue_free()
+		)
+	else:
 		closed.emit()
 		queue_free()
-	)
-	vbox.add_child(close_btn)
 
 func _style_btn(btn: Button, bg: Color, border: Color) -> void:
 	var s := StyleBoxFlat.new()
 	s.bg_color = bg
 	s.border_color = border
-	s.border_width_bottom = 6
-	s.set_corner_radius_all(20)
+	s.set_border_width_all(3)
+	s.border_width_bottom = 7
+	s.set_corner_radius_all(18)
+	var hv := s.duplicate() as StyleBoxFlat
+	hv.bg_color = bg.lightened(0.10)
 	btn.add_theme_stylebox_override("normal", s)
+	btn.add_theme_stylebox_override("hover", hv)
+	btn.add_theme_stylebox_override("pressed", hv)
 	if game_title_font != null:
 		btn.add_theme_font_override("font", game_title_font)
-	btn.add_theme_font_size_override("font_size", 24)
+	btn.add_theme_font_size_override("font_size", 26)
 	btn.add_theme_color_override("font_color", Color.WHITE)
+	btn.add_theme_color_override("font_outline_color", Color("#19470b"))
+	btn.add_theme_constant_override("outline_size", 6)
+	_wire_button_juice(btn)
+
+func _wire_button_juice(btn: Button) -> void:
+	btn.button_down.connect(func():
+		btn.pivot_offset = btn.size * 0.5
+		var tw := btn.create_tween()
+		tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		tw.tween_property(btn, "scale", Vector2(0.91, 0.91), 0.06)
+	)
+	btn.button_up.connect(func():
+		btn.pivot_offset = btn.size * 0.5
+		var tw := btn.create_tween()
+		tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		tw.tween_property(btn, "scale", Vector2(1.06, 1.06), 0.09)
+		tw.tween_property(btn, "scale", Vector2.ONE, 0.08)
+	)

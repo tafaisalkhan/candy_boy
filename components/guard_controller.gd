@@ -9,8 +9,8 @@ signal player_spotted(reason: String)
 @export var move_speed: float = 3.0
 @export var pause_duration: float = 0.55
 
-const GRANNY_SCENE: PackedScene = preload("res://scenes/granny/granny.tscn")
-const GUARD_SHADER: Shader = preload("res://scenes/stealth_escape/angry_granny.gdshader")
+const GRANNY_SCENE_PATH: String = "res://scenes/granny/granny.tscn"
+const GUARD_SHADER_PATH: String = "res://scenes/stealth_escape/angry_granny.gdshader"
 
 var visual_node: Node3D = null
 var anim_player: AnimationPlayer = null
@@ -96,9 +96,11 @@ func _build_visuals(p_tint: Color) -> void:
 	add_child(visual_node)
 
 	# 1. Granny Model with Proportional Scale (1.22)
-	var template: Node3D = GRANNY_SCENE.instantiate() as Node3D
-	var model: Node3D = template.get_node("Granny") as Node3D
-	template.remove_child(model)
+	var granny_packed := load(GRANNY_SCENE_PATH) as PackedScene if ResourceLoader.exists(GRANNY_SCENE_PATH) else null
+	var template: Node3D = granny_packed.instantiate() as Node3D if granny_packed != null else Node3D.new()
+	var model: Node3D = template.get_node_or_null("Granny") as Node3D if template.has_node("Granny") else Node3D.new()
+	if model.get_parent() != null:
+		template.remove_child(model)
 	var orig_shooter: Node = model.get_node_or_null("Shooter")
 	if orig_shooter:
 		model.remove_child(orig_shooter)
@@ -115,6 +117,7 @@ func _build_visuals(p_tint: Color) -> void:
 		_play_anim("Walk")
 
 	# Shader tint with proper texture mapping
+	var guard_shader := load(GUARD_SHADER_PATH) as Shader if ResourceLoader.exists(GUARD_SHADER_PATH) else null
 	for found in model.find_children("*", "MeshInstance3D", true, false):
 		var m := found as MeshInstance3D
 		if m.mesh == null:
@@ -122,7 +125,7 @@ func _build_visuals(p_tint: Color) -> void:
 		for s in m.mesh.get_surface_count():
 			var sm := m.get_active_material(s) as BaseMaterial3D
 			var om := ShaderMaterial.new()
-			om.shader = GUARD_SHADER
+			om.shader = guard_shader
 			if sm != null and sm.albedo_texture != null:
 				om.set_shader_parameter("albedo_tex", sm.albedo_texture)
 				om.set_shader_parameter("use_texture", true)

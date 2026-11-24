@@ -11,15 +11,13 @@ func _ready() -> void:
 	_build_ui()
 
 func _init_fonts() -> void:
-	if ResourceLoader.exists("res://assets/fonts/game_title.ttf"):
+	if ResourceLoader.exists("res://assets/fonts/LuckiestGuy-Regular.ttf"):
+		game_title_font = load("res://assets/fonts/LuckiestGuy-Regular.ttf") as Font
+	elif ResourceLoader.exists("res://assets/fonts/game_title.ttf"):
 		game_title_font = load("res://assets/fonts/game_title.ttf") as Font
 	elif ResourceLoader.exists("res://assets/fonts/LilitaOne-Regular.ttf"):
 		game_title_font = load("res://assets/fonts/LilitaOne-Regular.ttf") as Font
-
-	if ResourceLoader.exists("res://assets/fonts/LilitaOne-Regular.ttf"):
-		game_body_font = load("res://assets/fonts/LilitaOne-Regular.ttf") as Font
-	else:
-		game_body_font = game_title_font
+	game_body_font = game_title_font
 
 func _load_texture(path: String) -> Texture2D:
 	if ResourceLoader.exists(path):
@@ -182,12 +180,15 @@ func _build_ui() -> void:
 	accept_btn.pressed.connect(_on_accept_pressed)
 	v_box.add_child(accept_btn)
 
-	# Bouncy pop-in entrance animation
-	card.scale = Vector2(0.3, 0.3)
+	# Squash-and-stretch pop-in entrance animation (pause-safe)
+	card.scale = Vector2(0.42, 0.42)
 	card.modulate.a = 0.0
 	var pop_tw := create_tween()
-	pop_tw.tween_property(card, "scale", Vector2.ONE, 0.42).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	pop_tw.parallel().tween_property(card, "modulate:a", 1.0, 0.28)
+	pop_tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	pop_tw.tween_property(card, "modulate:a", 1.0, 0.12)
+	pop_tw.parallel().tween_property(card, "scale", Vector2(1.06, 0.95), 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	pop_tw.tween_property(card, "scale", Vector2(0.98, 1.02), 0.09)
+	pop_tw.tween_property(card, "scale", Vector2.ONE, 0.08)
 
 func _add_term_bullet(parent: Control, header: String, desc: String) -> void:
 	var box := VBoxContainer.new()
@@ -212,8 +213,9 @@ func _add_term_bullet(parent: Control, header: String, desc: String) -> void:
 	box.add_child(d_lbl)
 
 func _on_accept_pressed() -> void:
-	if SoundManager != null:
-		SoundManager.play_sfx("button")
+	var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+	if sm != null:
+		sm.play_sfx("button")
 	var tw := create_tween()
 	tw.tween_property(self, "modulate:a", 0.0, 0.22)
 	tw.chain().tween_callback(func():

@@ -134,17 +134,13 @@ const POWERUP_COIN_COST: int = 10
 const SPEED_UNLOCK_LEVEL: int = 1
 const INVIS_UNLOCK_LEVEL: int = 5
 const BYPASS_WALL_UNLOCK_LEVEL: int = 10
-const BOY_MODEL: PackedScene = preload("res://assets/models/boys/Model/characterMedium.fbx")
+const BOY_MODEL_PATH: String = "res://assets/models/boys/Model/characterMedium.fbx"
 
 func _init_game_fonts() -> void:
 	var tf := FontFile.new()
 	if tf.load_dynamic_font(ProjectSettings.globalize_path("res://assets/fonts/LuckiestGuy-Regular.ttf")) == OK:
 		game_title_font = tf
-	var bf := FontFile.new()
-	if bf.load_dynamic_font(ProjectSettings.globalize_path("res://assets/fonts/Fredoka-Variable.ttf")) == OK:
-		game_body_font = bf
-	if game_body_font == null:
-		game_body_font = game_title_font
+	game_body_font = game_title_font
 
 func _ready() -> void:
 	_init_game_fonts()
@@ -1830,7 +1826,8 @@ func _build_player() -> void:
 	is_entering_level = true
 	level_root.add_child(player_root)
 
-	var boy_inst: Node3D = BOY_MODEL.instantiate() as Node3D
+	var boy_scene: PackedScene = load(BOY_MODEL_PATH) as PackedScene if ResourceLoader.exists(BOY_MODEL_PATH) else null
+	var boy_inst: Node3D = boy_scene.instantiate() as Node3D if boy_scene != null else Node3D.new()
 	player_mesh = boy_inst
 	player_mesh.scale = Vector3.ONE * 0.55
 	player_mesh.rotation.y = PI
@@ -2466,18 +2463,28 @@ func _setup_hud() -> void:
 	obj_lbl.add_theme_constant_override("outline_size", 8)
 	hud_root.add_child(obj_lbl)
 
-	# 1b. Settings / Pause Icon Button at Top Left
+	# 1b. Settings / Pause Icon Button at Top Left (Crisp 64x64 Gear Icon)
 	var pause_btn := TextureButton.new()
 	pause_btn.name = "PauseButton"
-	pause_btn.texture_normal = _load_ui_texture("res://assets/ui/settings.svg")
+	pause_btn.texture_normal = _load_ui_texture("res://assets/ui/icons/icon-settings.png")
 	pause_btn.ignore_texture_size = true
 	pause_btn.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
 	pause_btn.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	pause_btn.offset_left = 24.0
 	pause_btn.offset_top = 22.0
-	pause_btn.offset_right = 76.0
-	pause_btn.offset_bottom = 74.0
+	pause_btn.offset_right = 80.0
+	pause_btn.offset_bottom = 78.0
+	pause_btn.pivot_offset = Vector2(28, 28)
 	pause_btn.pressed.connect(_on_pause_pressed)
+	pause_btn.button_down.connect(func():
+		var tw := pause_btn.create_tween()
+		tw.tween_property(pause_btn, "scale", Vector2(0.9, 0.9), 0.06)
+	)
+	pause_btn.button_up.connect(func():
+		var tw := pause_btn.create_tween()
+		tw.tween_property(pause_btn, "scale", Vector2(1.08, 1.08), 0.09)
+		tw.tween_property(pause_btn, "scale", Vector2.ONE, 0.08)
+	)
 	hud_root.add_child(pause_btn)
 
 	# 2. Coin Pill Badge at Top Right (Compact & Consistent)
@@ -2756,6 +2763,21 @@ func _add_interactive_powerup_item(parent: HBoxContainer, svg_path: String, _pow
 	out_refs["unlocked_col"] = badge_col
 
 	btn.pressed.connect(on_click)
+	btn.pivot_offset = Vector2(46, 46)
+	btn.button_down.connect(func():
+		var tw := btn.create_tween()
+		tw.tween_property(btn, "scale", Vector2(0.91, 0.91), 0.06)
+	)
+	btn.button_up.connect(func():
+		var tw := btn.create_tween()
+		tw.tween_property(btn, "scale", Vector2(1.08, 1.08), 0.09)
+		tw.tween_property(btn, "scale", Vector2.ONE, 0.08)
+	)
+	var p_idx := parent.get_child_count() - 1
+	btn.scale = Vector2.ZERO
+	var etw := btn.create_tween()
+	etw.tween_interval(0.12 + p_idx * 0.07)
+	etw.tween_property(btn, "scale", Vector2.ONE, 0.30).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	return b_lbl
 
 func _apply_powerup_lock_visual(refs: Dictionary, is_locked: bool, unlock_lvl: int) -> void:
@@ -3132,12 +3154,17 @@ func _activate_speed_powerup() -> void:
 		_show_rewarded_powerup_dialog("SPEED BOOST", _apply_speed_powerup)
 
 func _apply_speed_powerup() -> void:
-	speed_boost_time = 5.0
+	var upg_lvl := GameManager.upgrade_level("sneakers") if GameManager != null and GameManager.has_method("upgrade_level") else 0
+	speed_boost_time = 5.0 + float(upg_lvl) * 0.5
 	if SoundManager != null:
 		SoundManager.play_sfx("powerup_speed")
 	if SignalHub != null:
-		SignalHub.emit_powerup_activated("speed", 5.0)
+		SignalHub.emit_powerup_activated("speed", speed_boost_time)
 	_show_powerup_toast("SPEED BOOST ACTIVE! (-%d COINS)" % POWERUP_COIN_COST, Color("#f1c40f"))
+	_flash_powerup_screen(Color(1.0, 0.85, 0.2, 0.24))
+	if is_instance_valid(player_root):
+		_spawn_powerup_shockwave(player_root.global_position + Vector3(0, 0.12, 0), Color("#f1c40f"), 4.2)
+		_spawn_powerup_light_pillar(player_root.global_position, Color("#f1c40f"))
 	if is_instance_valid(player_ring):
 		var tw := create_tween()
 		tw.tween_property(player_ring, "scale", Vector3(1.35, 1.35, 1.35), 0.2)
@@ -3161,14 +3188,19 @@ func _activate_invisibility_powerup() -> void:
 		_show_rewarded_powerup_dialog("INVISIBILITY", _apply_invisibility_powerup)
 
 func _apply_invisibility_powerup() -> void:
-	invisibility_time = 5.0
+	var upg_lvl := GameManager.upgrade_level("cloak") if GameManager != null and GameManager.has_method("upgrade_level") else 0
+	invisibility_time = 5.0 + float(upg_lvl) * 1.5
 	is_player_invisible = true
 	if SoundManager != null:
 		SoundManager.play_sfx("powerup_invisible")
 	if SignalHub != null:
-		SignalHub.emit_powerup_activated("invisible", 5.0)
+		SignalHub.emit_powerup_activated("invisible", invisibility_time)
 	_set_player_transparency(0.35, Color("#ffffff"))
 	_show_powerup_toast("INVISIBLE! GUARDS CANNOT SEE YOU! (-%d COINS)" % POWERUP_COIN_COST, Color("#00cec9"))
+	_flash_powerup_screen(Color(0.0, 0.85, 0.9, 0.24))
+	if is_instance_valid(player_root):
+		_spawn_powerup_shockwave(player_root.global_position + Vector3(0, 0.12, 0), Color("#00cec9"), 4.2)
+		_spawn_powerup_light_pillar(player_root.global_position, Color("#00cec9"))
 
 func _activate_wall_pass_powerup() -> void:
 	if is_level_cleared or is_spotted:
@@ -3188,14 +3220,82 @@ func _activate_wall_pass_powerup() -> void:
 		_show_rewarded_powerup_dialog("BYPASS WALL", _apply_wall_pass_powerup)
 
 func _apply_wall_pass_powerup() -> void:
-	wall_pass_time = 5.0
+	var upg_lvl := GameManager.upgrade_level("wall_battery") if GameManager != null and GameManager.has_method("upgrade_level") else 0
+	wall_pass_time = 5.0 + float(upg_lvl) * 1.5
 	is_wall_pass_active = true
 	if SoundManager != null:
 		SoundManager.play_sfx("powerup_wall")
 	if SignalHub != null:
-		SignalHub.emit_powerup_activated("bypass_wall", 5.0)
+		SignalHub.emit_powerup_activated("bypass_wall", wall_pass_time)
 	_set_player_transparency(0.45, Color("#9b59b6"))
 	_show_powerup_toast("BYPASS WALL ACTIVE! WALK THROUGH WALLS! (-%d COINS)" % POWERUP_COIN_COST, Color("#9b59b6"))
+	_flash_powerup_screen(Color(0.68, 0.35, 0.85, 0.24))
+	if is_instance_valid(player_root):
+		_spawn_powerup_shockwave(player_root.global_position + Vector3(0, 0.12, 0), Color("#9b59b6"), 4.2)
+		_spawn_powerup_light_pillar(player_root.global_position, Color("#9b59b6"))
+
+func _spawn_powerup_shockwave(pos: Vector3, color: Color, target_scale: float = 4.0) -> void:
+	if not is_instance_valid(level_root):
+		return
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.65
+	torus.outer_radius = 0.88
+	ring.mesh = torus
+	ring.position = pos
+	ring.scale = Vector3.ONE * 0.35
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(color.r, color.g, color.b, 0.92)
+	mat.emission_enabled = true
+	mat.emission = color
+	mat.emission_energy_multiplier = 2.4
+	ring.material_override = mat
+	level_root.add_child(ring)
+	var tw := ring.create_tween().set_parallel(true)
+	tw.tween_property(ring, "scale", Vector3(target_scale, 0.45, target_scale), 0.55).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(mat, "albedo_color:a", 0.0, 0.55)
+	tw.chain().tween_callback(ring.queue_free)
+
+func _spawn_powerup_light_pillar(pos: Vector3, color: Color) -> void:
+	if not is_instance_valid(level_root):
+		return
+	var beam := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 1.05
+	cyl.bottom_radius = 1.35
+	cyl.height = 5.5
+	beam.mesh = cyl
+	beam.position = pos + Vector3.UP * 2.75
+	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.albedo_color = Color(color.r, color.g, color.b, 0.55)
+	mat.emission_enabled = true
+	mat.emission = color
+	mat.emission_energy_multiplier = 2.0
+	beam.material_override = mat
+	level_root.add_child(beam)
+	var tw := beam.create_tween().set_parallel(true)
+	tw.tween_property(beam, "scale", Vector3(0.15, 1.35, 0.15), 0.62).set_trans(Tween.TRANS_QUAD)
+	tw.tween_property(mat, "albedo_color:a", 0.0, 0.62)
+	tw.chain().tween_callback(beam.queue_free)
+
+func _flash_powerup_screen(color: Color) -> void:
+	if not is_instance_valid(hud_root):
+		return
+	var flash := ColorRect.new()
+	flash.color = color
+	flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud_root.add_child(flash)
+	var tw := flash.create_tween()
+	tw.tween_property(flash, "color:a", 0.0, 0.36)
+	tw.tween_callback(flash.queue_free)
 
 func _set_player_transparency(alpha: float, rim_col: Color = Color.TRANSPARENT) -> void:
 	if not is_instance_valid(player_mesh):
@@ -3496,7 +3596,7 @@ func _on_fail_continue_pressed() -> void:
 func _show_level_end_interstitial() -> void:
 	var ad_mgr = AdManager if AdManager != null else get_tree().root.get_node_or_null("AdManager")
 	if ad_mgr != null and ad_mgr.has_method("on_level_finished_check_interstitial"):
-		ad_mgr.on_level_finished_check_interstitial(true)
+		ad_mgr.on_level_finished_check_interstitial(false, current_level)
 
 func _on_pause_pressed() -> void:
 	if not is_instance_valid(hud_root):
@@ -3537,7 +3637,6 @@ func _on_retry_pressed() -> void:
 	if SoundManager != null:
 		SoundManager.play_sfx("button")
 	_cleanup_fail_overlay()
-	_show_level_end_interstitial()
 	if is_instance_valid(intro_cinematic_tween):
 		intro_cinematic_tween.kill()
 	_reset_camera_to_origin(true)

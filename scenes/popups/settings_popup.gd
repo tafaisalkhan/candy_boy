@@ -13,129 +13,181 @@ var sfx_btn: Button = null
 var music_btn: Button = null
 var remove_ads_btn: Button = null
 
+var switch_music_knob: PanelContainer = null
+var switch_music_bg: StyleBoxFlat = null
+var switch_sfx_knob: PanelContainer = null
+var switch_sfx_bg: StyleBoxFlat = null
+var vip_status_lbl: Label = null
+var tab_main_box: VBoxContainer = null
+var tab_guide_box: VBoxContainer = null
+var _card: Control = null
+
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_init_fonts()
 	_build_ui()
 
 func _init_fonts() -> void:
-	if ResourceLoader.exists("res://assets/fonts/game_title.ttf"):
-		game_title_font = load("res://assets/fonts/game_title.ttf") as Font
-	elif ResourceLoader.exists("res://assets/fonts/LilitaOne-Regular.ttf"):
-		game_title_font = load("res://assets/fonts/LilitaOne-Regular.ttf") as Font
-	elif ResourceLoader.exists("res://assets/fonts/LuckiestGuy-Regular.ttf"):
+	if ResourceLoader.exists("res://assets/fonts/LuckiestGuy-Regular.ttf"):
 		game_title_font = load("res://assets/fonts/LuckiestGuy-Regular.ttf") as Font
+	elif ResourceLoader.exists("res://assets/fonts/game_title.ttf"):
+		game_title_font = load("res://assets/fonts/game_title.ttf") as Font
+	game_body_font = game_title_font
 
-	if ResourceLoader.exists("res://assets/fonts/LilitaOne-Regular.ttf"):
-		game_body_font = load("res://assets/fonts/LilitaOne-Regular.ttf") as Font
-	elif ResourceLoader.exists("res://assets/fonts/Fredoka-Variable.ttf"):
-		game_body_font = load("res://assets/fonts/Fredoka-Variable.ttf") as Font
-	else:
-		game_body_font = game_title_font
+func _load_tex(path: String) -> Texture2D:
+	if ResourceLoader.exists(path):
+		return load(path) as Texture2D
+	var gp := ProjectSettings.globalize_path(path)
+	if FileAccess.file_exists(gp):
+		var im := Image.load_from_file(gp)
+		if im != null and not im.is_empty():
+			return ImageTexture.create_from_image(im)
+	return null
 
 func _build_ui() -> void:
 	name = "SettingsPopup"
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
 	# 1. Dark Backdrop Dimmer
 	var backdrop := ColorRect.new()
-	backdrop.color = Color(0.02, 0.04, 0.08, 0.85)
-	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.color = Color(0.01, 0.05, 0.08, 0.78)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(backdrop)
 
-	# 2. Main Dialog Card (640 width for generous 130px side margins)
-	var card := PanelContainer.new()
-	card.name = "SettingsCard"
-	card.custom_minimum_size = Vector2(640, 980)
-	card.set_anchors_preset(Control.PRESET_CENTER)
-	card.pivot_offset = Vector2(320, 490)
-	card.offset_left = -320
-	card.offset_top = -490
-	card.offset_right = 320
-	card.offset_bottom = 490
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(center)
 
+	var card_size := Vector2(740, 820 if show_main_menu_button else 740)
+	_card = Control.new()
+	_card.name = "SettingsCard"
+	_card.custom_minimum_size = card_size
+	_card.size = card_size
+	_card.pivot_offset = card_size * 0.5
+	center.add_child(_card)
+
+	var bg_panel := PanelContainer.new()
+	bg_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var card_style := StyleBoxFlat.new()
-	card_style.bg_color = Color("#1e272e")
-	card_style.border_color = Color("#00cec9")
+	card_style.bg_color = Color("#184566")
+	card_style.border_color = Color("#0b1d2c")
+	card_style.set_border_width_all(6)
 	card_style.border_width_bottom = 12
-	card_style.border_width_top = 4
-	card_style.border_width_left = 4
-	card_style.border_width_right = 4
-	card_style.set_corner_radius_all(32)
-	card_style.shadow_color = Color(0, 0, 0, 0.65)
-	card_style.shadow_size = 24
-	card.add_theme_stylebox_override("panel", card_style)
-	add_child(card)
+	card_style.set_corner_radius_all(24)
+	card_style.content_margin_left = 32
+	card_style.content_margin_right = 32
+	card_style.content_margin_top = 28
+	card_style.content_margin_bottom = 28
+	bg_panel.add_theme_stylebox_override("panel", card_style)
+	_card.add_child(bg_panel)
 
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 28)
-	margin.add_theme_constant_override("margin_right", 28)
-	margin.add_theme_constant_override("margin_top", 28)
-	margin.add_theme_constant_override("margin_bottom", 28)
-	card.add_child(margin)
+	# Left Side Tabs sticking out of the frame (⚙ Settings / 🎮 Controls)
+	var side_tabs := VBoxContainer.new()
+	side_tabs.position = Vector2(-64, 68)
+	side_tabs.add_theme_constant_override("separation", 12)
+	_card.add_child(side_tabs)
 
-	var v_box := VBoxContainer.new()
-	v_box.alignment = BoxContainer.ALIGNMENT_CENTER
-	v_box.add_theme_constant_override("separation", 18)
-	margin.add_child(v_box)
+	var tab_gear := _side_tab_button(_load_tex("res://assets/ui/icons/icon-settings.png"), true, func():
+		var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+		if sm != null and sm.has_method("play_sfx"):
+			sm.play_sfx("button")
+		tab_main_box.visible = true
+		tab_guide_box.visible = false
+	)
+	side_tabs.add_child(tab_gear)
 
-	# Title Banner
+	var tab_pad := _side_tab_button(_load_tex("res://assets/ui/icons/icon-guide.png"), false, func():
+		var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+		if sm != null and sm.has_method("play_sfx"):
+			sm.play_sfx("button")
+		tab_main_box.visible = false
+		tab_guide_box.visible = true
+	)
+	side_tabs.add_child(tab_pad)
+
+	# Red Square [✖] Close Button overlapping top-right corner
+	var close_x := Button.new()
+	close_x.text = "✖"
+	close_x.size = Vector2(54, 54)
+	close_x.position = Vector2(card_size.x - 32, -20)
+	if game_title_font != null:
+		close_x.add_theme_font_override("font", game_title_font)
+	close_x.add_theme_font_size_override("font_size", 28)
+	close_x.add_theme_color_override("font_color", Color.WHITE)
+	var cs := StyleBoxFlat.new()
+	cs.bg_color = Color("#e83b3b")
+	cs.border_color = Color("#1a0808")
+	cs.set_border_width_all(3)
+	cs.border_width_bottom = 6
+	cs.set_corner_radius_all(12)
+	close_x.add_theme_stylebox_override("normal", cs)
+	close_x.add_theme_stylebox_override("hover", cs)
+	close_x.add_theme_stylebox_override("pressed", cs)
+	close_x.pressed.connect(_close_with_anim)
+	_card.add_child(close_x)
+	_wire_button_juice(close_x)
+
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 18)
+	bg_panel.add_child(body)
+
 	var title_lbl := Label.new()
-	title_lbl.text = "⚙️ GAME SETTINGS"
+	title_lbl.text = "SETTINGS"
 	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	if game_title_font != null:
 		title_lbl.add_theme_font_override("font", game_title_font)
-	title_lbl.add_theme_font_size_override("font_size", 40)
-	title_lbl.add_theme_color_override("font_color", Color("#00cec9"))
-	title_lbl.add_theme_color_override("font_outline_color", Color.BLACK)
+	title_lbl.add_theme_font_size_override("font_size", 46)
+	title_lbl.add_theme_color_override("font_color", Color.WHITE)
+	title_lbl.add_theme_color_override("font_outline_color", Color("#0a1824"))
 	title_lbl.add_theme_constant_override("outline_size", 10)
-	v_box.add_child(title_lbl)
+	body.add_child(title_lbl)
 
-	# Sound Effects (SFX) Button
-	sfx_btn = Button.new()
-	_update_sfx_button()
-	sfx_btn.custom_minimum_size = Vector2(520, 78)
-	sfx_btn.pressed.connect(_toggle_sfx)
-	v_box.add_child(sfx_btn)
+	# --- Main Settings Tab ---
+	tab_main_box = VBoxContainer.new()
+	tab_main_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tab_main_box.add_theme_constant_override("separation", 18)
+	body.add_child(tab_main_box)
 
-	# Background Music (BGM) Button
-	music_btn = Button.new()
-	_update_music_button()
-	music_btn.custom_minimum_size = Vector2(520, 78)
-	music_btn.pressed.connect(_toggle_music)
-	v_box.add_child(music_btn)
+	var m_row := _toggle_switch_row("Music", _toggle_music)
+	switch_music_knob = m_row.knob
+	switch_music_bg = m_row.bg
+	music_btn = m_row.track
+	tab_main_box.add_child(m_row.row)
 
-	# Remove Ads ($4.99) Button
-	remove_ads_btn = Button.new()
-	_update_remove_ads_button()
-	remove_ads_btn.custom_minimum_size = Vector2(520, 78)
-	remove_ads_btn.pressed.connect(_on_remove_ads_pressed)
-	v_box.add_child(remove_ads_btn)
+	var s_row := _toggle_switch_row("Sound FX", _toggle_sfx)
+	switch_sfx_knob = s_row.knob
+	switch_sfx_bg = s_row.bg
+	sfx_btn = s_row.track
+	tab_main_box.add_child(s_row.row)
 
-	# Coin Shop Button
-	var shop_btn := Button.new()
-	shop_btn.text = "🛍️ COIN SHOP"
-	shop_btn.custom_minimum_size = Vector2(520, 68)
-	_apply_btn_style(shop_btn, Color("#f39c12"), Color("#d35400"), Color("#f1c40f"))
-	shop_btn.pressed.connect(func():
-		var shop_script := load("res://scenes/popups/shop_popup.gd") as Script
-		if shop_script != null:
-			add_child(shop_script.new())
+	var btn_guide := _glossy_action_button("How to Play", _load_tex("res://assets/ui/icons/icon-guide.png"), Color("#19b5cc"), Vector2(0, 64))
+	btn_guide.pressed.connect(func():
+		var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+		if sm != null and sm.has_method("play_sfx"):
+			sm.play_sfx("button")
+		tab_main_box.visible = false
+		tab_guide_box.visible = true
 	)
-	v_box.add_child(shop_btn)
+	tab_main_box.add_child(btn_guide)
+
+	var btn_privacy := _glossy_action_button("Privacy Policy", _load_tex("res://assets/ui/icons/icon-levels.png"), Color("#19b5cc"), Vector2(0, 64))
+	btn_privacy.pressed.connect(func():
+		var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+		if sm != null and sm.has_method("play_sfx"):
+			sm.play_sfx("button")
+		privacy_policy_requested.emit()
+	)
+	tab_main_box.add_child(btn_privacy)
 
 	# Rate, Share & Coffee Row
 	var action_row := HBoxContainer.new()
-	action_row.add_theme_constant_override("separation", 12)
+	action_row.add_theme_constant_override("separation", 14)
 	action_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	v_box.add_child(action_row)
+	tab_main_box.add_child(action_row)
 
-	var rate_btn := Button.new()
-	rate_btn.text = "⭐ RATE"
-	rate_btn.custom_minimum_size = Vector2(165, 62)
-	_apply_btn_style(rate_btn, Color("#2ecc71"), Color("#1e824c"), Color("#40d47e"))
+	var rate_btn := _glossy_action_button("Rate ★", _load_tex("res://assets/ui/icons/icon-star.png"), Color("#22c55e"), Vector2(210, 62))
 	rate_btn.pressed.connect(func():
 		var ad_mgr = get_tree().root.get_node_or_null("AdManager")
 		if ad_mgr != null and ad_mgr.has_method("rate_app"):
@@ -143,10 +195,7 @@ func _build_ui() -> void:
 	)
 	action_row.add_child(rate_btn)
 
-	var share_btn := Button.new()
-	share_btn.text = "📤 SHARE"
-	share_btn.custom_minimum_size = Vector2(165, 62)
-	_apply_btn_style(share_btn, Color("#3498db"), Color("#1f618d"), Color("#5dade2"))
+	var share_btn := _glossy_action_button("Share", null, Color("#19b5cc"), Vector2(210, 62))
 	share_btn.pressed.connect(func():
 		var ad_mgr = get_tree().root.get_node_or_null("AdManager")
 		if ad_mgr != null and ad_mgr.has_method("share_game"):
@@ -154,10 +203,7 @@ func _build_ui() -> void:
 	)
 	action_row.add_child(share_btn)
 
-	var coffee_btn := Button.new()
-	coffee_btn.text = "☕ $1.99"
-	coffee_btn.custom_minimum_size = Vector2(165, 62)
-	_apply_btn_style(coffee_btn, Color("#e67e22"), Color("#d35400"), Color("#f39c12"))
+	var coffee_btn := _glossy_action_button("Coffee $1.99", _load_tex("res://assets/ui/icons/icon-store.png"), Color("#f39c12"), Vector2(210, 62))
 	coffee_btn.pressed.connect(func():
 		var ad_mgr = get_tree().root.get_node_or_null("AdManager")
 		if ad_mgr != null and ad_mgr.has_method("request_coffee_purchase"):
@@ -165,143 +211,288 @@ func _build_ui() -> void:
 	)
 	action_row.add_child(coffee_btn)
 
-	# Privacy Policy Button
-	var privacy_btn := Button.new()
-	privacy_btn.text = "📜 PRIVACY POLICY"
-	privacy_btn.custom_minimum_size = Vector2(520, 74)
-	_apply_btn_style(privacy_btn, Color("#34495e"), Color("#2c3e50"), Color("#4b6584"))
-	privacy_btn.pressed.connect(func():
-		privacy_policy_requested.emit()
-	)
-	v_box.add_child(privacy_btn)
+	# Bottom Row: [ No Ads • $4.99 ] + [ VIP Status ]
+	var bot_row := HBoxContainer.new()
+	bot_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	bot_row.add_theme_constant_override("separation", 18)
+	tab_main_box.add_child(bot_row)
+
+	remove_ads_btn = _glossy_action_button("No Ads  •  $4.99", _load_tex("res://assets/ui/icons/icon-store.png"), Color("#e8edf2"), Vector2(320, 64), Color("#162936"))
+	remove_ads_btn.pressed.connect(_on_remove_ads_pressed)
+	bot_row.add_child(remove_ads_btn)
+
+	var vip_pill := PanelContainer.new()
+	vip_pill.custom_minimum_size = Vector2(310, 64)
+	var vs := StyleBoxFlat.new()
+	vs.bg_color = Color("#d8e3ec")
+	vs.border_color = Color("#162936")
+	vs.set_border_width_all(3)
+	vs.set_corner_radius_all(14)
+	vs.content_margin_left = 14
+	vs.content_margin_right = 14
+	vip_pill.add_theme_stylebox_override("panel", vs)
+	vip_status_lbl = Label.new()
+	vip_status_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vip_status_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	if game_title_font != null:
+		vip_status_lbl.add_theme_font_override("font", game_title_font)
+	vip_status_lbl.add_theme_font_size_override("font_size", 20)
+	vip_status_lbl.add_theme_color_override("font_color", Color("#162936"))
+	vip_pill.add_child(vip_status_lbl)
+	bot_row.add_child(vip_pill)
 
 	if show_main_menu_button:
-		var menu_btn := Button.new()
-		menu_btn.text = "🏠 MAIN MENU"
-		menu_btn.custom_minimum_size = Vector2(520, 68)
-		_apply_btn_style(menu_btn, Color("#8e44ad"), Color("#5b2c6f"), Color("#9b59b6"))
+		var menu_row := HBoxContainer.new()
+		menu_row.alignment = BoxContainer.ALIGNMENT_CENTER
+		menu_row.add_theme_constant_override("separation", 16)
+		tab_main_box.add_child(menu_row)
+
+		var resume_btn := _glossy_action_button("▶  RESUME", null, Color("#7ed321"), Vector2(320, 68))
+		resume_btn.pressed.connect(_close_with_anim)
+		menu_row.add_child(resume_btn)
+
+		var menu_btn := _glossy_action_button("MAIN MENU", null, Color("#19b5cc"), Vector2(320, 68))
 		menu_btn.pressed.connect(func():
-			if SoundManager != null:
-				SoundManager.play_sfx("button")
+			var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+			if sm != null and sm.has_method("play_sfx"):
+				sm.play_sfx("button")
 			main_menu_requested.emit()
 			queue_free()
 		)
-		v_box.add_child(menu_btn)
+		menu_row.add_child(menu_btn)
 
-	# Close / Resume Button
-	var close_btn := Button.new()
-	close_btn.text = "▶ RESUME" if show_main_menu_button else "✖ CLOSE"
-	close_btn.custom_minimum_size = Vector2(520, 82)
-	_apply_btn_style(close_btn, Color("#e74c3c"), Color("#c0392b"), Color("#ff6b6b"))
-	close_btn.pressed.connect(func():
-		if SoundManager != null:
-			SoundManager.play_sfx("button")
-		var close_tw := create_tween()
-		close_tw.tween_property(card, "scale", Vector2(0.5, 0.5), 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
-		close_tw.parallel().tween_property(card, "modulate:a", 0.0, 0.18)
-		close_tw.tween_callback(func():
+	# --- Controls / How to Play Tab ---
+	tab_guide_box = VBoxContainer.new()
+	tab_guide_box.visible = false
+	tab_guide_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	tab_guide_box.add_theme_constant_override("separation", 18)
+	body.add_child(tab_guide_box)
+
+	for tip in [
+		"• DRAG anywhere on the lower screen to sneak around Granny's house.",
+		"• OPEN cabinets & collect all target items shown in the top FIND bar.",
+		"• Grab the GOLDEN KEY to unlock locked cabinets and doors.",
+		"• Use SPEED, INVISIBILITY, and BYPASS WALL power-ups to escape Granny!",
+		"• Reach the EXIT DOOR once all items are collected to win +20 Coins!",
+	]:
+		var tl := Label.new()
+		tl.text = tip
+		tl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		if game_title_font != null:
+			tl.add_theme_font_override("font", game_title_font)
+		tl.add_theme_font_size_override("font_size", 24)
+		tl.add_theme_color_override("font_color", Color("#e9f7ff"))
+		tl.add_theme_color_override("font_outline_color", Color("#0a1824"))
+		tl.add_theme_constant_override("outline_size", 6)
+		tab_guide_box.add_child(tl)
+
+	var back_btn := _glossy_action_button("Back to Settings", null, Color("#7ed321"), Vector2(0, 64))
+	back_btn.pressed.connect(func():
+		var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+		if sm != null and sm.has_method("play_sfx"):
+			sm.play_sfx("button")
+		tab_guide_box.visible = false
+		tab_main_box.visible = true
+	)
+	tab_guide_box.add_child(back_btn)
+
+	_refresh_switches()
+
+	# Squash-and-stretch entrance animation (pause-safe)
+	_card.scale = Vector2(0.42, 0.42)
+	_card.modulate.a = 0.0
+	var pop_tw := create_tween()
+	pop_tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	pop_tw.tween_property(_card, "modulate:a", 1.0, 0.12)
+	pop_tw.parallel().tween_property(_card, "scale", Vector2(1.06, 0.95), 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	pop_tw.tween_property(_card, "scale", Vector2(0.98, 1.02), 0.09)
+	pop_tw.tween_property(_card, "scale", Vector2.ONE, 0.08)
+
+func _close_with_anim() -> void:
+	var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+	if sm != null and sm.has_method("play_sfx"):
+		sm.play_sfx("button")
+	if is_instance_valid(_card):
+		var tw := create_tween()
+		tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		tw.tween_property(_card, "scale", Vector2(1.05, 1.05), 0.06)
+		tw.tween_property(_card, "scale", Vector2(0.35, 0.35), 0.14).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+		tw.parallel().tween_property(_card, "modulate:a", 0.0, 0.14)
+		tw.tween_callback(func():
 			closed.emit()
 			queue_free()
 		)
-	)
-	v_box.add_child(close_btn)
+	else:
+		closed.emit()
+		queue_free()
 
-	# Bouncy entrance animation
-	card.scale = Vector2(0.3, 0.3)
-	card.modulate.a = 0.0
-	var pop_tw := create_tween()
-	pop_tw.tween_property(card, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	pop_tw.parallel().tween_property(card, "modulate:a", 1.0, 0.25)
+func _toggle_switch_row(label_text: String, on_toggle: Callable) -> Dictionary:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 18)
+	var lbl := Label.new()
+	lbl.text = label_text
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if game_title_font != null:
+		lbl.add_theme_font_override("font", game_title_font)
+	lbl.add_theme_font_size_override("font_size", 32)
+	lbl.add_theme_color_override("font_color", Color.WHITE)
+	lbl.add_theme_color_override("font_outline_color", Color("#0c1c26"))
+	lbl.add_theme_constant_override("outline_size", 7)
+	row.add_child(lbl)
+
+	var track := Button.new()
+	track.custom_minimum_size = Vector2(96, 46)
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color("#38c159")
+	bg.border_color = Color("#0c1c26")
+	bg.set_border_width_all(3)
+	bg.set_corner_radius_all(23)
+	track.add_theme_stylebox_override("normal", bg)
+	track.add_theme_stylebox_override("hover", bg)
+	track.add_theme_stylebox_override("pressed", bg)
+	track.pressed.connect(on_toggle)
+	row.add_child(track)
+
+	var knob := PanelContainer.new()
+	knob.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	knob.size = Vector2(36, 36)
+	knob.position = Vector2(54, 5)
+	var ks := StyleBoxFlat.new()
+	ks.bg_color = Color.WHITE
+	ks.border_color = Color("#0c1c26")
+	ks.set_border_width_all(2)
+	ks.set_corner_radius_all(18)
+	knob.add_theme_stylebox_override("panel", ks)
+	track.add_child(knob)
+	return {"row": row, "knob": knob, "bg": bg, "track": track}
+
+func _set_switch_visual(knob: PanelContainer, bg: StyleBoxFlat, is_on: bool) -> void:
+	if not is_instance_valid(knob) or bg == null:
+		return
+	bg.bg_color = Color("#38c159") if is_on else Color("#4a5d6b")
+	var tw := knob.create_tween()
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_property(knob, "position:x", 54.0 if is_on else 6.0, 0.12).set_trans(Tween.TRANS_QUAD)
+
+func _refresh_switches() -> void:
+	var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+	var sfx_on: bool = sm.sfx_enabled if sm != null else true
+	var music_on: bool = sm.music_enabled if sm != null else true
+	_set_switch_visual(switch_music_knob, switch_music_bg, music_on)
+	_set_switch_visual(switch_sfx_knob, switch_sfx_bg, sfx_on)
+	_update_remove_ads_button()
 
 func _toggle_sfx() -> void:
-	var new_sfx := not (SoundManager.sfx_enabled if SoundManager != null else true)
-	if SoundManager != null:
-		SoundManager.set_sfx_enabled(new_sfx)
-		SoundManager.play_sfx("button")
-	if GameManager != null:
-		GameManager.set_audio_settings(SoundManager.music_enabled if SoundManager != null else true, new_sfx)
-	_update_sfx_button()
+	var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+	var gm = get_tree().root.get_node_or_null("GameManager") if is_inside_tree() else null
+	var new_sfx: bool = not (sm.sfx_enabled if sm != null else true)
+	if sm != null:
+		sm.set_sfx_enabled(new_sfx)
+		sm.play_sfx("button")
+	if gm != null:
+		gm.set_audio_settings(sm.music_enabled if sm != null else true, new_sfx)
+	_refresh_switches()
 
 func _toggle_music() -> void:
-	var new_music := not (SoundManager.music_enabled if SoundManager != null else true)
-	if SoundManager != null:
-		SoundManager.set_music_enabled(new_music)
-		SoundManager.play_sfx("button")
-	if GameManager != null:
-		GameManager.set_audio_settings(new_music, SoundManager.sfx_enabled if SoundManager != null else true)
-	_update_music_button()
+	var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+	var gm = get_tree().root.get_node_or_null("GameManager") if is_inside_tree() else null
+	var new_music: bool = not (sm.music_enabled if sm != null else true)
+	if sm != null:
+		sm.set_music_enabled(new_music)
+		sm.play_sfx("button")
+	if gm != null:
+		gm.set_audio_settings(new_music, sm.sfx_enabled if sm != null else true)
+	_refresh_switches()
 
 func _on_remove_ads_pressed() -> void:
-	if GameManager != null and GameManager.is_ads_removed:
+	var gm = get_tree().root.get_node_or_null("GameManager") if is_inside_tree() else null
+	var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+	if gm != null and gm.is_ads_removed:
 		return
-	if GameManager != null:
-		GameManager.set_ads_removed(true)
-	var ad_mgr = get_tree().root.get_node_or_null("AdManager")
+	var ad_mgr = get_tree().root.get_node_or_null("AdManager") if is_inside_tree() else null
+	if ad_mgr != null and ad_mgr.has_method("request_remove_ads"):
+		ad_mgr.request_remove_ads()
+	if gm != null:
+		gm.set_ads_removed(true)
 	if ad_mgr != null and ad_mgr.has_method("remove_all_ads"):
 		ad_mgr.remove_all_ads()
-	if SoundManager != null:
-		SoundManager.play_sfx("coin_sound")
+	if sm != null:
+		sm.play_sfx("coin")
 	_update_remove_ads_button()
 
 func _update_remove_ads_button() -> void:
-	if not is_instance_valid(remove_ads_btn):
-		return
-	var is_removed := GameManager.is_ads_removed if GameManager != null else false
-	if is_removed:
-		remove_ads_btn.text = "✅ ADS REMOVED"
-		remove_ads_btn.disabled = true
-		_apply_btn_style(remove_ads_btn, Color("#27ae60"), Color("#1e824c"), Color("#2ecc71"))
-	else:
-		remove_ads_btn.text = "🚫 REMOVE ADS ($4.99)"
-		remove_ads_btn.disabled = false
-		_apply_btn_style(remove_ads_btn, Color("#e67e22"), Color("#d35400"), Color("#f39c12"))
+	var gm = get_tree().root.get_node_or_null("GameManager") if is_inside_tree() else null
+	var is_removed: bool = gm.is_ads_removed if gm != null else false
+	if is_instance_valid(remove_ads_btn):
+		remove_ads_btn.text = "  Ad-Free Active ✓" if is_removed else "  No Ads  •  $4.99"
+		remove_ads_btn.disabled = is_removed
+	if is_instance_valid(vip_status_lbl):
+		vip_status_lbl.text = "VIP Status:\n" + ("Ad-Free Active" if is_removed else "Standard Player")
 
-func _update_sfx_button() -> void:
-	if not is_instance_valid(sfx_btn):
-		return
-	var is_on := SoundManager.sfx_enabled if SoundManager != null else true
-	sfx_btn.text = "🔊 SOUND EFFECTS: " + ("ON" if is_on else "OFF")
-	var bg_col := Color("#27ae60") if is_on else Color("#7f8c8d")
-	var border_col := Color("#1e824c") if is_on else Color("#576574")
-	var hover_col := Color("#2ecc71") if is_on else Color("#95a5a6")
-	_apply_btn_style(sfx_btn, bg_col, border_col, hover_col)
+func _side_tab_button(icon_tex: Texture2D, active: bool, on_press: Callable) -> Button:
+	var btn := Button.new()
+	if icon_tex != null:
+		btn.icon = icon_tex
+		btn.expand_icon = true
+		btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		btn.add_theme_constant_override("icon_max_width", 34)
+	btn.custom_minimum_size = Vector2(68, 64)
+	var st := StyleBoxFlat.new()
+	st.bg_color = Color("#184566") if active else Color("#0f2c42")
+	st.border_color = Color("#0b1d2c")
+	st.set_border_width_all(4)
+	st.border_width_right = 0
+	st.corner_radius_top_left = 14
+	st.corner_radius_bottom_left = 14
+	btn.add_theme_stylebox_override("normal", st)
+	btn.add_theme_stylebox_override("hover", st)
+	btn.add_theme_stylebox_override("pressed", st)
+	btn.pressed.connect(on_press)
+	_wire_button_juice(btn)
+	return btn
 
-func _update_music_button() -> void:
-	if not is_instance_valid(music_btn):
-		return
-	var is_on := SoundManager.music_enabled if SoundManager != null else true
-	music_btn.text = "🎵 MUSIC: " + ("ON" if is_on else "OFF")
-	var bg_col := Color("#2980b9") if is_on else Color("#7f8c8d")
-	var border_col := Color("#1f618d") if is_on else Color("#576574")
-	var hover_col := Color("#3498db") if is_on else Color("#95a5a6")
-	_apply_btn_style(music_btn, bg_col, border_col, hover_col)
-
-func _apply_btn_style(btn: Button, bg_col: Color, border_col: Color, hover_col: Color) -> void:
-	var b_style := StyleBoxFlat.new()
-	b_style.bg_color = bg_col
-	b_style.border_color = border_col
-	b_style.border_width_bottom = 6
-	b_style.border_width_left = 3
-	b_style.border_width_right = 3
-	b_style.border_width_top = 2
-	b_style.set_corner_radius_all(22)
-	b_style.shadow_color = Color(0, 0, 0, 0.4)
-	b_style.shadow_size = 6
-
-	var h_style := b_style.duplicate() as StyleBoxFlat
-	h_style.bg_color = hover_col
-
-	var p_style := b_style.duplicate() as StyleBoxFlat
-	p_style.bg_color = border_col
-	p_style.border_width_bottom = 2
-	p_style.border_width_top = 6
-
-	btn.add_theme_stylebox_override("normal", b_style)
-	btn.add_theme_stylebox_override("hover", h_style)
-	btn.add_theme_stylebox_override("pressed", p_style)
+func _glossy_action_button(text: String, icon_tex: Texture2D, bg_col: Color, sz: Vector2, text_col: Color = Color.WHITE) -> Button:
+	var btn := Button.new()
+	btn.text = "  " + text
+	if icon_tex != null:
+		btn.icon = icon_tex
+		btn.expand_icon = true
+		btn.add_theme_constant_override("icon_max_width", 28)
+	btn.custom_minimum_size = sz
 	if game_title_font != null:
 		btn.add_theme_font_override("font", game_title_font)
-	btn.add_theme_font_size_override("font_size", 26)
-	btn.add_theme_color_override("font_color", Color.WHITE)
-	btn.add_theme_color_override("font_outline_color", Color.BLACK)
-	btn.add_theme_constant_override("outline_size", 6)
+	btn.add_theme_font_size_override("font_size", 24)
+	btn.add_theme_color_override("font_color", text_col)
+	if text_col == Color.WHITE:
+		btn.add_theme_color_override("font_outline_color", Color("#0b2533"))
+		btn.add_theme_constant_override("outline_size", 6)
+	var st := StyleBoxFlat.new()
+	st.bg_color = bg_col
+	st.border_color = Color("#0c1c26")
+	st.set_border_width_all(3)
+	st.border_width_bottom = 7
+	st.set_corner_radius_all(16)
+	st.content_margin_left = 16
+	st.content_margin_right = 16
+	var hv := st.duplicate() as StyleBoxFlat
+	hv.bg_color = bg_col.lightened(0.10)
+	btn.add_theme_stylebox_override("normal", st)
+	btn.add_theme_stylebox_override("hover", hv)
+	btn.add_theme_stylebox_override("pressed", hv)
+	_wire_button_juice(btn)
+	return btn
+
+func _wire_button_juice(btn: Button) -> void:
+	btn.button_down.connect(func():
+		btn.pivot_offset = btn.size * 0.5
+		var tw := btn.create_tween()
+		tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		tw.tween_property(btn, "scale", Vector2(0.91, 0.91), 0.06)
+	)
+	btn.button_up.connect(func():
+		btn.pivot_offset = btn.size * 0.5
+		var tw := btn.create_tween()
+		tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		tw.tween_property(btn, "scale", Vector2(1.06, 1.06), 0.09)
+		tw.tween_property(btn, "scale", Vector2.ONE, 0.08)
+	)

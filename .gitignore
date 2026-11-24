@@ -6,6 +6,7 @@
 # User Request Exclusions
 # 1. No Assets
 assets/
+resources/
 *.png
 *.jpg
 *.jpeg
@@ -34,12 +35,14 @@ assets/
 *.flag
 screenshot_*
 *.log
+*.cmd
 
 # Internal State & Notes
 STATE.md
 
 # Large binary downloads in addons
 addons/**/downloads/
+addons/**/.gdignore
 *.zip
 
 # Android Build & Output
@@ -49,9 +52,10 @@ build/
 *.apk
 
 # Local-only AdMob production IDs & Keystore credentials
-admob_secrets.gd
-admob_secrets.gd.uid
-admob_secrets.json
+admob_secrets*
+release_signing*
+export_presets*
+export_credentials*
 key.properties
 **/key.properties
 keystore_credentials*

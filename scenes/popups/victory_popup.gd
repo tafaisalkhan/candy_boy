@@ -18,15 +18,13 @@ func _ready() -> void:
 	_build_ui()
 
 func _init_fonts() -> void:
-	if ResourceLoader.exists("res://assets/fonts/game_title.ttf"):
+	if ResourceLoader.exists("res://assets/fonts/LuckiestGuy-Regular.ttf"):
+		game_title_font = load("res://assets/fonts/LuckiestGuy-Regular.ttf") as Font
+	elif ResourceLoader.exists("res://assets/fonts/game_title.ttf"):
 		game_title_font = load("res://assets/fonts/game_title.ttf") as Font
 	elif ResourceLoader.exists("res://assets/fonts/LilitaOne-Regular.ttf"):
 		game_title_font = load("res://assets/fonts/LilitaOne-Regular.ttf") as Font
-
-	if ResourceLoader.exists("res://assets/fonts/LilitaOne-Regular.ttf"):
-		game_body_font = load("res://assets/fonts/LilitaOne-Regular.ttf") as Font
-	else:
-		game_body_font = game_title_font
+	game_body_font = game_title_font
 
 func setup(p_level: int, p_reward: int = 20, p_image_path: String = "") -> void:
 	level_number = p_level
@@ -63,10 +61,11 @@ func _build_ui() -> void:
 	card.pivot_offset = Vector2(340, 380)
 
 	var card_style := StyleBoxFlat.new()
-	card_style.bg_color = Color("#15212d")
+	card_style.bg_color = Color("#184566")
 	card_style.set_corner_radius_all(34)
-	card_style.border_color = Color("#f1c40f")
+	card_style.border_color = Color("#0b1d2c")
 	card_style.set_border_width_all(8)
+	card_style.border_width_bottom = 12
 	card_style.shadow_color = Color(0, 0, 0, 0.7)
 	card_style.shadow_size = 35
 	card.add_theme_stylebox_override("panel", card_style)
@@ -151,8 +150,9 @@ func _build_ui() -> void:
 				var s_tw := create_tween()
 				s_tw.tween_property(s_node, "scale", Vector2(1.25, 1.25), 0.20).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 				s_tw.tween_property(s_node, "scale", Vector2.ONE, 0.14)
-				if SoundManager != null:
-					SoundManager.play_sfx("star_sound")
+				var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+				if sm != null:
+					sm.play_sfx("star_sound")
 		)
 
 	var sub_lbl := Label.new()
@@ -297,8 +297,9 @@ func _build_ui() -> void:
 				r_text.text = " REWARD: +%d COINS (DOUBLED!)" % reward_coins
 				ad_btn.text = "✅ 2X REWARD CLAIMED!"
 				ad_btn.disabled = true
-				if SoundManager != null:
-					SoundManager.play_sfx("coin_sound")
+				var sm = get_tree().root.get_node_or_null("SoundManager") if is_inside_tree() else null
+				if sm != null:
+					sm.play_sfx("coin_sound")
 				reward_coins_ready.emit(ad_btn.get_global_rect().get_center(), bonus_amt)
 			)
 	)
@@ -369,12 +370,15 @@ func _build_ui() -> void:
 	)
 	v_box.add_child(replay_btn)
 
-	# Bouncy entrance animation
-	card.scale = Vector2(0.3, 0.3)
+	# Squash-and-stretch entrance animation (pause-safe)
+	card.scale = Vector2(0.42, 0.42)
 	card.modulate.a = 0.0
 	var pop_tw := create_tween()
-	pop_tw.tween_property(card, "scale", Vector2.ONE, 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	pop_tw.parallel().tween_property(card, "modulate:a", 1.0, 0.3)
+	pop_tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	pop_tw.tween_property(card, "modulate:a", 1.0, 0.12)
+	pop_tw.parallel().tween_property(card, "scale", Vector2(1.06, 0.95), 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	pop_tw.tween_property(card, "scale", Vector2(0.98, 1.02), 0.09)
+	pop_tw.tween_property(card, "scale", Vector2.ONE, 0.08)
 
 	pop_tw.tween_interval(0.2)
 	pop_tw.tween_callback(func():

@@ -15,7 +15,9 @@ func _ready() -> void:
 	_build_ui()
 
 func _init_fonts() -> void:
-	if ResourceLoader.exists("res://assets/fonts/game_title.ttf"):
+	if ResourceLoader.exists("res://assets/fonts/LuckiestGuy-Regular.ttf"):
+		game_title_font = load("res://assets/fonts/LuckiestGuy-Regular.ttf") as Font
+	elif ResourceLoader.exists("res://assets/fonts/game_title.ttf"):
 		game_title_font = load("res://assets/fonts/game_title.ttf") as Font
 	elif ResourceLoader.exists("res://assets/fonts/LilitaOne-Regular.ttf"):
 		game_title_font = load("res://assets/fonts/LilitaOne-Regular.ttf") as Font
@@ -84,9 +86,10 @@ func _build_ui() -> void:
 	card.offset_bottom = 120
 
 	var card_style := StyleBoxFlat.new()
-	card_style.bg_color = Color(0.08, 0.12, 0.20, 0.95)
-	card_style.border_color = Color("#f1c40f")
+	card_style.bg_color = Color("#184566")
+	card_style.border_color = Color("#0b1d2c")
 	card_style.set_border_width_all(6)
+	card_style.border_width_bottom = 10
 	card_style.set_corner_radius_all(28)
 	card_style.shadow_color = Color(0, 0, 0, 0.6)
 	card_style.shadow_size = 20
@@ -138,9 +141,14 @@ func _build_ui() -> void:
 	)
 	v_box.add_child(start_btn)
 
-	card.scale = Vector2(0.8, 0.8)
+	card.scale = Vector2(0.42, 0.42)
+	card.modulate.a = 0.0
 	var tw := create_tween()
-	tw.tween_property(card, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tw.tween_property(card, "modulate:a", 1.0, 0.12)
+	tw.parallel().tween_property(card, "scale", Vector2(1.06, 0.95), 0.16).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(card, "scale", Vector2(0.98, 1.02), 0.09)
+	tw.tween_property(card, "scale", Vector2.ONE, 0.08)
 
 func dismiss() -> void:
 	var tw := create_tween()
